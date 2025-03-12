@@ -32,7 +32,7 @@ def allowed_file(filename):
 def is_video_file(filename):
     """Sprawdza czy plik jest filmem"""
     return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in {'mp4', 'avi', 'mov'}
+           filename.rsplit('.', 1)[1].lower() in {'mp4', 'mov'}  # Usunięto 'avi'
 
 # Ścieżki do modeli
 fastai_model_path = os.path.join(app.config['MODEL_PATH'], 'klasyfikator_zwierząt.pkl')
@@ -235,42 +235,50 @@ def process_video(video_path):
                 new_width = int(width * (max_dim / height))
             width, height = new_width, new_height
         
-        # Utworzenie nazwy pliku wynikowego
+        # Utworzenie nazwy pliku wynikowego - zawsze jako MP4
         output_filename = f"processed_{os.path.basename(video_path)}"
+        if not output_filename.lower().endswith('.mp4'):
+            output_filename = output_filename.rsplit('.', 1)[0] + '.mp4'
+            
         output_path = os.path.join(
             app.config['UPLOAD_FOLDER'], 'processed', output_filename)
-        output_path = output_path.replace('.mp4', '.avi')  # Zawsze używamy .avi
         
         # Utworzenie tymczasowego pliku zamiast bezpośredniego zapisu
-        temp_output_path = f"{output_path}.temp.avi"
+        temp_output_path = f"{output_path}.temp.mp4"
         
-        # Lista dostępnych kodeków do wypróbowania
+        # Lista dostępnych kodeków do wypróbowania - tylko MP4 kompatybilne
         codecs = [
-            ('XVID', 'avi'),
-            ('MJPG', 'avi'),
-            ('MP4V', 'avi'),
-            ('DIV3', 'avi'),
-            ('X264', 'avi')
+            ('mp4v', 'mp4'),  # Standardowy kodek MP4
+            ('avc1', 'mp4'),  # H.264
+            ('h264', 'mp4')   # Jeszcze jeden wariant H.264
         ]
         
         # Próba użycia różnych kodeków
         out = None
+        used_codec = None
+        used_ext = None
+        
         for codec, ext in codecs:
             try:
-                print(f"Próba użycia kodeka {codec}...")
+                print(f"Próba użycia kodeka {codec} dla MP4...")
                 fourcc = cv2.VideoWriter_fourcc(*codec)
-                test_path = temp_output_path.replace('.avi', f'.{ext}')
+                test_path = temp_output_path.replace('.mp4', f'.{ext}')
                 out = cv2.VideoWriter(test_path, fourcc, fps, (width, height))
                 
-                if out.isOpened():
+                if out and out.isOpened():
                     temp_output_path = test_path
-                    print(f"Udane otwarcie pliku wyjściowego z kodekiem {codec}")
+                    used_codec = codec
+                    used_ext = ext
+                    print(f"Udane otwarcie pliku wyjściowego MP4 z kodekiem {codec}")
                     break
                 else:
-                    out.release()
+                    if out:
+                        out.release()
                     out = None
             except Exception as e:
                 print(f"Błąd przy próbie użycia kodeka {codec}: {str(e)}")
+                if out:
+                    out.release()
                 out = None
         
         if out is None or not out.isOpened():
@@ -430,6 +438,10 @@ def create_fallback_video(output_path, width, height, fps):
         # Zapewnienie, że fps jest poprawne
         fps = max(10, min(fps, 30))
         
+        # Upewnij się, że ścieżka wyjściowa ma rozszerzenie MP4
+        if not output_path.lower().endswith('.mp4'):
+            output_path = output_path.rsplit('.', 1)[0] + '.mp4'
+        
         # Utwórz pustą klatkę
         frame = np.zeros((height, width, 3), dtype=np.uint8)
         
@@ -453,30 +465,30 @@ def create_fallback_video(output_path, width, height, fps):
         cv2.rectangle(frame, (20, 20), (width-20, height-20), (0, 120, 255), 2)
         
         # Ustaw tymczasową ścieżkę wyjściową
-        temp_path = f"{output_path}.fallback.avi"
+        temp_path = f"{output_path}.fallback.mp4"
         
-        # Lista kodeków do wypróbowania
+        # Lista kodeków MP4 do wypróbowania
         codecs = [
-            ('XVID', 'avi'),
-            ('MJPG', 'avi'),
-            ('MP4V', 'avi')
+            ('mp4v', 'mp4'),
+            ('avc1', 'mp4'),
+            ('h264', 'mp4')
         ]
         
         # Wypróbuj różne kodeki
         for codec, ext in codecs:
             try:
-                print(f"Próba utworzenia awaryjnego wideo z kodekiem {codec}...")
+                print(f"Próba utworzenia awaryjnego wideo z kodekiem MP4 {codec}...")
                 fourcc = cv2.VideoWriter_fourcc(*codec)
-                test_path = temp_path.replace('.avi', f'.{ext}')
+                test_path = temp_path.replace('.mp4', f'.{ext}')
                 out = cv2.VideoWriter(test_path, fourcc, fps, (width, height))
                 
-                if out.isOpened():
+                if out and out.isOpened():
                     # Zapisz klatkę wielokrotnie (ok. 5 sekund)
                     for _ in range(int(fps * 5)):
                         out.write(frame)
                     
                     out.release()
-                    print(f"Utworzono awaryjne wideo: {test_path}")
+                    print(f"Utworzono awaryjne wideo MP4: {test_path}")
                     
                     # Skopiuj do docelowej ścieżki
                     try:
@@ -484,22 +496,23 @@ def create_fallback_video(output_path, width, height, fps):
                             os.remove(output_path)
                         shutil.copy2(test_path, output_path)
                         os.remove(test_path)
-                        print(f"Skopiowano awaryjne wideo do: {output_path}")
+                        print(f"Skopiowano awaryjne wideo MP4 do: {output_path}")
                         return output_path
                     except Exception as e:
-                        print(f"Nie udało się skopiować awaryjnego wideo: {e}")
+                        print(f"Nie udało się skopiować awaryjnego wideo MP4: {e}")
                         return test_path  # Zwróć ścieżkę tymczasową, jeśli kopiowanie się nie udało
                         
                     break
                 else:
-                    out.release()
+                    if out:
+                        out.release()
             except Exception as e:
-                print(f"Błąd przy próbie utworzenia awaryjnego wideo z kodekiem {codec}: {str(e)}")
+                print(f"Błąd przy próbie utworzenia awaryjnego wideo MP4 z kodekiem {codec}: {str(e)}")
         
-        print("Nie udało się utworzyć awaryjnego wideo z żadnym kodekiem")
+        print("Nie udało się utworzyć awaryjnego wideo MP4 z żadnym kodekiem")
         return None
     except Exception as e:
-        print(f"Błąd podczas tworzenia awaryjnego wideo: {e}")
+        print(f"Błąd podczas tworzenia awaryjnego wideo MP4: {e}")
         return None
 
 @app.route('/uploads/<path:filename>')
