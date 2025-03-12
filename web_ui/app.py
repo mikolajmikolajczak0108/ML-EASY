@@ -192,6 +192,16 @@ def detect_objects():
 def process_video(video_path):
     """Przetwarzanie wideo z detekcją obiektów"""
     try:
+        # Sprawdzenie czy plik istnieje
+        if not os.path.exists(video_path):
+            print(f"Plik wideo nie istnieje: {video_path}")
+            return None
+            
+        # Sprawdzenie czy plik ma odpowiedni rozmiar
+        if os.path.getsize(video_path) < 1000:  # Mniej niż 1KB
+            print(f"Plik wideo jest zbyt mały: {video_path}")
+            return None
+
         # Otwarcie wideo
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
@@ -214,7 +224,7 @@ def process_video(video_path):
         
         print(f"Parametry wideo: {width}x{height}, {fps} FPS, {total_frames} klatek")
         
-        # Ograniczenie rozmiaru wyjściowego
+        # Ograniczenie rozmiaru wyjściowego do rozsądnych wartości
         max_dim = 640
         if width > max_dim or height > max_dim:
             if width > height:
@@ -229,33 +239,44 @@ def process_video(video_path):
         output_filename = f"processed_{os.path.basename(video_path)}"
         output_path = os.path.join(
             app.config['UPLOAD_FOLDER'], 'processed', output_filename)
+        output_path = output_path.replace('.mp4', '.avi')  # Zawsze używamy .avi
         
         # Utworzenie tymczasowego pliku zamiast bezpośredniego zapisu
-        temp_output_path = f"{output_path}.temp.mp4"
+        temp_output_path = f"{output_path}.temp.avi"
         
-        # Inicjalizacja zapisywania wideo - najpierw spróbuj z H.264
-        fourcc = cv2.VideoWriter_fourcc(*'avc1')  # Kodek H.264
-        out = cv2.VideoWriter(temp_output_path, fourcc, fps, (width, height))
+        # Lista dostępnych kodeków do wypróbowania
+        codecs = [
+            ('XVID', 'avi'),
+            ('MJPG', 'avi'),
+            ('MP4V', 'avi'),
+            ('DIV3', 'avi'),
+            ('X264', 'avi')
+        ]
         
-        if not out.isOpened():
-            print(f"Nie można utworzyć pliku wyjściowego z kodekiem H.264: {temp_output_path}")
-            # Spróbuj z XVID
-            fourcc = cv2.VideoWriter_fourcc(*'XVID')
-            temp_output_path = temp_output_path.replace('.mp4', '.avi')
-            output_path = output_path.replace('.mp4', '.avi')
-            out = cv2.VideoWriter(temp_output_path, fourcc, fps, (width, height))
-            
-            if not out.isOpened():
-                print("Nie można utworzyć pliku wyjściowego z kodekiem XVID")
-                # Jeszcze jedna próba z MJPG
-                fourcc = cv2.VideoWriter_fourcc(*'MJPG')
-                temp_output_path = temp_output_path.replace('.avi', '.avi')  # Nadal używamy .avi
-                out = cv2.VideoWriter(temp_output_path, fourcc, fps, (width, height))
+        # Próba użycia różnych kodeków
+        out = None
+        for codec, ext in codecs:
+            try:
+                print(f"Próba użycia kodeka {codec}...")
+                fourcc = cv2.VideoWriter_fourcc(*codec)
+                test_path = temp_output_path.replace('.avi', f'.{ext}')
+                out = cv2.VideoWriter(test_path, fourcc, fps, (width, height))
                 
-                if not out.isOpened():
-                    print("Nie można utworzyć pliku wyjściowego z żadnym kodekiem")
-                    cap.release()
-                    return None
+                if out.isOpened():
+                    temp_output_path = test_path
+                    print(f"Udane otwarcie pliku wyjściowego z kodekiem {codec}")
+                    break
+                else:
+                    out.release()
+                    out = None
+            except Exception as e:
+                print(f"Błąd przy próbie użycia kodeka {codec}: {str(e)}")
+                out = None
+        
+        if out is None or not out.isOpened():
+            print("Nie można utworzyć pliku wyjściowego z żadnym kodekiem")
+            cap.release()
+            return None
         
         # Klasy zwierząt, które nas interesują
         animal_classes = ['dog', 'cat', 'bird']
@@ -350,63 +371,136 @@ def process_video(video_path):
         if frames_written == 0 or not os.path.exists(temp_output_path) or os.path.getsize(temp_output_path) < 100:
             print("Przetwarzanie nie powiodło się: brak klatek lub pusty plik")
             # Utworzenie "awaryjnego" wideo z pojedynczą klatką
-            create_fallback_video(output_path, width, height, fps)
-            return output_path
+            fallback_path = create_fallback_video(output_path, width, height, fps)
+            
+            # Sprawdź, czy plik awaryjny został pomyślnie utworzony
+            if fallback_path and os.path.exists(fallback_path) and os.path.getsize(fallback_path) > 0:
+                print(f"Utworzono awaryjne wideo zamiast: {fallback_path}")
+                return fallback_path
+            else:
+                print("Nie udało się utworzyć nawet awaryjnego wideo")
+                return None
         
         # Przenieś plik tymczasowy do docelowego
         try:
             if os.path.exists(output_path):
                 os.remove(output_path)
-            os.rename(temp_output_path, output_path)
-            print(f"Przeniesiono plik tymczasowy do {output_path}")
+            
+            # Sprawdź, czy plik tymczasowy istnieje
+            if not os.path.exists(temp_output_path):
+                print(f"Plik tymczasowy nie istnieje: {temp_output_path}")
+                return None
+                
+            print(f"Przenoszenie pliku z {temp_output_path} do {output_path}")
+            shutil.copy2(temp_output_path, output_path)  # Użyj copy2 zamiast rename
+            os.remove(temp_output_path)  # Usuń plik tymczasowy po skopiowaniu
+            
+            # Sprawdź, czy plik docelowy istnieje
+            if not os.path.exists(output_path):
+                print(f"Plik docelowy nie został utworzony: {output_path}")
+                return None
+                
+            print(f"Plik został pomyślnie skopiowany do {output_path}")
+            
         except Exception as e:
             print(f"Błąd podczas przenoszenia pliku: {e}")
-            # Jeśli nie udało się przenieść, spróbuj skopiować
-            try:
-                shutil.copy(temp_output_path, output_path)
-                os.remove(temp_output_path)
-            except Exception as e2:
-                print(f"Nie udało się również skopiować pliku: {e2}")
+            # Jeśli nie udało się przenieść, spróbuj zwrócić ścieżkę do pliku tymczasowego
+            if os.path.exists(temp_output_path) and os.path.getsize(temp_output_path) > 0:
+                print(f"Zwracam ścieżkę do pliku tymczasowego: {temp_output_path}")
+                return temp_output_path
+            else:
+                print("Nie można zwrócić nawet ścieżki tymczasowej")
                 return None
             
         return output_path
         
     except Exception as e:
         print(f"Błąd podczas przetwarzania wideo: {str(e)}")
+        import traceback
+        traceback.print_exc()  # Drukuj pełny traceback dla lepszego debugowania
         return None
 
 def create_fallback_video(output_path, width, height, fps):
     """Tworzy awaryjne wideo z jedną klatką informującą o problemie"""
     try:
+        # Zapewnienie, że szerokość i wysokość są poprawne
+        width = max(320, min(width, 1280))
+        height = max(240, min(height, 720))
+        
+        # Zapewnienie, że fps jest poprawne
+        fps = max(10, min(fps, 30))
+        
         # Utwórz pustą klatkę
         frame = np.zeros((height, width, 3), dtype=np.uint8)
         
         # Dodaj tekst informacyjny
-        cv2.putText(
-            frame, "Przetwarzanie wideo nie powiodło się",
-            (width//10, height//2 - 20), cv2.FONT_HERSHEY_SIMPLEX, 
-            0.7, (255, 255, 255), 2
-        )
-        cv2.putText(
-            frame, "Spróbuj z innym plikiem",
-            (width//10, height//2 + 20), cv2.FONT_HERSHEY_SIMPLEX, 
-            0.7, (255, 255, 255), 2
-        )
+        text_lines = [
+            "Przetwarzanie wideo nie powiodło się",
+            "Spróbuj z innym plikiem",
+            f"Rozdzielczość: {width}x{height}, FPS: {fps}"
+        ]
         
-        # Zapisz jako wideo
-        fourcc = cv2.VideoWriter_fourcc(*'MJPG')
-        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+        y_position = height // 2 - 30
+        for line in text_lines:
+            cv2.putText(
+                frame, line,
+                (width//10, y_position), cv2.FONT_HERSHEY_SIMPLEX, 
+                0.7, (255, 255, 255), 2
+            )
+            y_position += 40
         
-        # Zapisz klatkę 30 razy (1 sekunda przy 30 fps)
-        for _ in range(int(fps)):
-            out.write(frame)
+        # Dodaj obramowanie
+        cv2.rectangle(frame, (20, 20), (width-20, height-20), (0, 120, 255), 2)
         
-        out.release()
-        print(f"Utworzono awaryjne wideo: {output_path}")
-        return True
+        # Ustaw tymczasową ścieżkę wyjściową
+        temp_path = f"{output_path}.fallback.avi"
+        
+        # Lista kodeków do wypróbowania
+        codecs = [
+            ('XVID', 'avi'),
+            ('MJPG', 'avi'),
+            ('MP4V', 'avi')
+        ]
+        
+        # Wypróbuj różne kodeki
+        for codec, ext in codecs:
+            try:
+                print(f"Próba utworzenia awaryjnego wideo z kodekiem {codec}...")
+                fourcc = cv2.VideoWriter_fourcc(*codec)
+                test_path = temp_path.replace('.avi', f'.{ext}')
+                out = cv2.VideoWriter(test_path, fourcc, fps, (width, height))
+                
+                if out.isOpened():
+                    # Zapisz klatkę wielokrotnie (ok. 5 sekund)
+                    for _ in range(int(fps * 5)):
+                        out.write(frame)
+                    
+                    out.release()
+                    print(f"Utworzono awaryjne wideo: {test_path}")
+                    
+                    # Skopiuj do docelowej ścieżki
+                    try:
+                        if os.path.exists(output_path):
+                            os.remove(output_path)
+                        shutil.copy2(test_path, output_path)
+                        os.remove(test_path)
+                        print(f"Skopiowano awaryjne wideo do: {output_path}")
+                        return output_path
+                    except Exception as e:
+                        print(f"Nie udało się skopiować awaryjnego wideo: {e}")
+                        return test_path  # Zwróć ścieżkę tymczasową, jeśli kopiowanie się nie udało
+                        
+                    break
+                else:
+                    out.release()
+            except Exception as e:
+                print(f"Błąd przy próbie utworzenia awaryjnego wideo z kodekiem {codec}: {str(e)}")
+        
+        print("Nie udało się utworzyć awaryjnego wideo z żadnym kodekiem")
+        return None
     except Exception as e:
         print(f"Błąd podczas tworzenia awaryjnego wideo: {e}")
-        return False
+        return None
 
 @app.route('/uploads/<path:filename>')
 def uploaded_file(filename):
