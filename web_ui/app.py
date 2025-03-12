@@ -334,8 +334,6 @@ def process_video(video_path):
             # Sprawdzenie co 50 klatek czy zapisywanie działa
             if processed_count % 50 == 0:
                 print(f"Przetworzono {processed_count} klatek, zapisano {frames_written}")
-                # Upewnij się, że dane są zapisane na dysk
-                out.flush()
             
             # Ograniczenie maksymalnej liczby klatek do 1000 (dla bezpieczeństwa)
             if processed_count >= 1000:
