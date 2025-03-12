@@ -26,7 +26,6 @@ System do rozpoznawania zwierząt na obrazach i w filmach z wykorzystaniem sieci
 - **Frontend**: HTML, CSS, JavaScript, Bootstrap
 - **Modele ML**:
   - FastAI (klasyfikacja obrazów)
-  - YOLOv5 (detekcja obiektów)
 - **Biblioteki**: OpenCV, PyTorch, NumPy
 
 ## Instalacja i uruchomienie
