@@ -102,18 +102,8 @@
             padding: 5px 10px;
             border-radius: 15px;
             font-weight: bold;
-        }
-        .dog {
             background-color: rgba(46, 204, 113, 0.3);
             border: 1px solid #2ecc71;
-        }
-        .cat {
-            background-color: rgba(231, 76, 60, 0.3);
-            border: 1px solid #e74c3c;
-        }
-        .bird {
-            background-color: rgba(52, 152, 219, 0.3);
-            border: 1px solid #3498db;
         }
     </style>
 </head>
@@ -133,7 +123,7 @@
             </li>
             <li class="nav-item" role="presentation">
                 <button class="nav-link" id="detect-tab" data-bs-toggle="tab" data-bs-target="#detect" type="button" role="tab" aria-controls="detect" aria-selected="false">
-                    Detekcja w Filmie/Obrazie
+                    Klasyfikacja Wideo
                 </button>
             </li>
         </ul>
@@ -184,19 +174,19 @@
                 </div>
             </div>
             
-            <!-- Zakładka Detekcji -->
+            <!-- Zakładka Klasyfikacji Wideo -->
             <div class="tab-pane fade" id="detect" role="tabpanel" aria-labelledby="detect-tab">
                 <div class="row">
                     <div class="col-md-6">
                         <div class="card">
                             <div class="card-header">
-                                Wgraj Film lub Obraz
+                                Wgraj Film
                             </div>
                             <div class="card-body">
                                 <form id="video-form">
                                     <div class="mb-3">
-                                        <label for="video-upload" class="form-label">Wybierz plik wideo lub obraz</label>
-                                        <input class="form-control" type="file" id="video-upload" accept="video/*,image/*">
+                                        <label for="video-upload" class="form-label">Wybierz plik wideo (MP4 lub MOV)</label>
+                                        <input class="form-control" type="file" id="video-upload" accept="video/mp4,video/mov">
                                     </div>
                                     <button type="submit" class="btn btn-primary">Analizuj</button>
                                 </form>
@@ -210,26 +200,23 @@
                     <div class="col-md-6">
                         <div class="card">
                             <div class="card-header">
-                                Wynik Detekcji
+                                Wynik Klasyfikacji Wideo
                             </div>
                             <div class="card-body">
                                 <div id="detection-loader" class="loader" style="display: none;"></div>
                                 <div id="detection-result" style="display: none;">
-                                    <div id="detection-video-container">
-                                        <h5 id="detection-title"></h5>
+                                    <div class="result-box mb-3">
+                                        <div class="prediction" id="video-prediction-text"></div>
+                                        <div class="confidence" id="video-confidence-text"></div>
+                                    </div>
+                                    <div id="video-container">
+                                        <h5>Przetworzone wideo:</h5>
+                                        <p class="text-muted">Poniższe wideo zawiera losowo wybrane 15 klatek z klasyfikacją</p>
                                         <video id="detection-video" class="video-preview" controls></video>
-                                    </div>
-                                    <div id="detection-image-container">
-                                        <h5>Wykryte obiekty:</h5>
-                                        <img id="detection-image" class="image-preview">
-                                    </div>
-                                    <div class="detection-result" id="detection-animals">
-                                        <h5>Wykryte zwierzęta:</h5>
-                                        <div id="animal-list"></div>
                                     </div>
                                 </div>
                                 <div id="detection-placeholder" class="text-center text-muted">
-                                    <p>Wgraj plik wideo/obraz, aby zobaczyć wynik detekcji</p>
+                                    <p>Wgraj plik wideo, aby zobaczyć wynik klasyfikacji</p>
                                     <i class="bi bi-camera-video" style="font-size: 3rem;"></i>
                                 </div>
                                 <div id="detection-error" class="alert alert-danger mt-3" style="display: none;"></div>
@@ -258,7 +245,7 @@
             const imagePreview = document.getElementById('image-preview');
             const imagePreviewContainer = document.getElementById('image-preview-container');
             
-            // Obsługa formularza detekcji w wideo
+            // Obsługa formularza klasyfikacji wideo
             const videoForm = document.getElementById('video-form');
             const videoUpload = document.getElementById('video-upload');
             const videoPreview = document.getElementById('video-preview');
@@ -334,7 +321,7 @@
                 });
             });
             
-            // Obsługa wysłania formularza detekcji w wideo
+            // Obsługa wysłania formularza klasyfikacji wideo
             videoForm.addEventListener('submit', function(e) {
                 e.preventDefault();
                 
@@ -342,7 +329,12 @@
                 const file = fileInput.files[0];
                 
                 if (!file) {
-                    showDetectionError('Proszę wybrać plik wideo lub obrazu');
+                    showDetectionError('Proszę wybrać plik wideo');
+                    return;
+                }
+                
+                if (!file.type.startsWith('video/')) {
+                    showDetectionError('Proszę wybrać plik wideo (MP4 lub MOV)');
                     return;
                 }
                 
@@ -360,13 +352,13 @@
                 .then(response => {
                     if (!response.ok) {
                         return response.json().then(data => {
-                            throw new Error(data.error || 'Wystąpił błąd podczas detekcji');
+                            throw new Error(data.error || 'Wystąpił błąd podczas klasyfikacji wideo');
                         });
                     }
                     return response.json();
                 })
                 .then(data => {
-                    handleDetectionResult(data);
+                    handleVideoResult(data);
                 })
                 .catch(error => {
                     document.getElementById('detection-loader').style.display = 'none';
@@ -374,50 +366,21 @@
                 });
             });
             
-            // Funkcja obsługująca wynik detekcji
-            function handleDetectionResult(data) {
+            // Funkcja obsługująca wynik klasyfikacji wideo
+            function handleVideoResult(data) {
                 document.getElementById('detection-loader').style.display = 'none';
                 document.getElementById('detection-result').style.display = 'block';
                 document.getElementById('detection-placeholder').style.display = 'none';
                 
-                const videoContainer = document.getElementById('detection-video-container');
-                const imageContainer = document.getElementById('detection-image-container');
-                const animalsList = document.getElementById('animal-list');
+                // Wyświetlenie wyniku klasyfikacji
+                document.getElementById('video-prediction-text').textContent = data.prediction || "Brak klasyfikacji";
+                document.getElementById('video-confidence-text').textContent = 
+                    data.probability ? `Pewność: ${(data.probability * 100).toFixed(2)}%` : "Brak danych o pewności";
                 
-                // Czyszczenie poprzednich wyników
-                animalsList.innerHTML = '';
-                
-                // Wyświetlenie wyników detekcji
-                if (data.filename.endsWith('.mp4') || data.filename.endsWith('.mov')) {
-                    // Wyświetlenie wideo
-                    videoContainer.style.display = 'block';
-                    imageContainer.style.display = 'none';
-                    
-                    document.getElementById('detection-title').textContent = 'Przetworzone wideo';
-                    
-                    const video = document.getElementById('detection-video');
-                    video.src = `/uploads/processed/${data.filename}`;
-                    video.load();
-                } else {
-                    // Wyświetlenie obrazu
-                    videoContainer.style.display = 'none';
-                    imageContainer.style.display = 'block';
-                    
-                    const img = document.getElementById('detection-image');
-                    img.src = `/uploads/processed/${data.filename}`;
-                    
-                    // Wyświetlenie wykrytych zwierząt
-                    if (data.animals && data.animals.length > 0) {
-                        data.animals.forEach(animal => {
-                            const animalElement = document.createElement('div');
-                            animalElement.className = `animal-result ${animal.class}`;
-                            animalElement.textContent = `${animal.class} (${(animal.confidence * 100).toFixed(2)}%)`;
-                            animalsList.appendChild(animalElement);
-                        });
-                    } else {
-                        animalsList.innerHTML = '<p>Nie wykryto żadnych zwierząt.</p>';
-                    }
-                }
+                // Wyświetlenie wideo
+                const video = document.getElementById('detection-video');
+                video.src = `/uploads/processed/${data.filename}`;
+                video.load();
             }
             
             // Funkcje pomocnicze
@@ -427,17 +390,12 @@
                 .then(data => {
                     const statusBar = document.getElementById('status-bar');
                     
-                    if (data.fastai_model === 'loaded' && data.yolo_model === 'loaded') {
+                    if (data.fastai_model === 'loaded') {
                         statusBar.className = 'bg-success text-white text-center';
-                        statusBar.textContent = 'Wszystkie modele są załadowane i gotowe do użycia';
-                    } else if (data.fastai_model === 'not_loaded' && data.yolo_model === 'not_loaded') {
-                        statusBar.className = 'bg-danger text-white text-center';
-                        statusBar.textContent = 'Modele nie są załadowane. Kliknij tutaj, aby załadować modele.';
-                        statusBar.style.cursor = 'pointer';
-                        statusBar.addEventListener('click', loadModels);
+                        statusBar.textContent = 'Model klasyfikacji jest załadowany i gotowy do użycia';
                     } else {
-                        statusBar.className = 'bg-warning text-center';
-                        statusBar.textContent = 'Niektóre modele nie są załadowane. Kliknij tutaj, aby załadować wszystkie modele.';
+                        statusBar.className = 'bg-danger text-white text-center';
+                        statusBar.textContent = 'Model klasyfikacji nie jest załadowany. Kliknij tutaj, aby załadować model.';
                         statusBar.style.cursor = 'pointer';
                         statusBar.addEventListener('click', loadModels);
                     }
@@ -452,21 +410,21 @@
             function loadModels() {
                 const statusBar = document.getElementById('status-bar');
                 statusBar.className = 'bg-info text-white text-center';
-                statusBar.textContent = 'Ładowanie modeli...';
+                statusBar.textContent = 'Ładowanie modelu...';
                 statusBar.style.cursor = 'default';
                 
                 fetch('/load_models')
                 .then(response => {
                     if (!response.ok) {
                         return response.json().then(data => {
-                            throw new Error(data.error || 'Błąd ładowania modeli');
+                            throw new Error(data.error || 'Błąd ładowania modelu');
                         });
                     }
                     return response.json();
                 })
                 .then(data => {
                     statusBar.className = 'bg-success text-white text-center';
-                    statusBar.textContent = 'Wszystkie modele są załadowane i gotowe do użycia';
+                    statusBar.textContent = 'Model klasyfikacji jest załadowany i gotowy do użycia';
                 })
                 .catch(error => {
                     statusBar.className = 'bg-danger text-white text-center';

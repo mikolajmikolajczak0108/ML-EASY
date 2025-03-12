@@ -2,7 +2,7 @@ import os
 import cv2
 import uuid
 import shutil
-import torch
+import random
 from flask import Flask, render_template, request, jsonify, send_from_directory
 from werkzeug.utils import secure_filename
 import numpy as np
@@ -15,7 +15,7 @@ app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), 'uploads')
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # limit 16MB
-app.config['ALLOWED_EXTENSIONS'] = {'png', 'jpg', 'jpeg', 'gif', 'mp4', 'avi', 'mov'}
+app.config['ALLOWED_EXTENSIONS'] = {'png', 'jpg', 'jpeg', 'gif', 'mp4', 'mov'}
 app.config['MODEL_PATH'] = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), 'models')
 
@@ -32,11 +32,10 @@ def allowed_file(filename):
 def is_video_file(filename):
     """Sprawdza czy plik jest filmem"""
     return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in {'mp4', 'mov'}  # Usunięto 'avi'
+           filename.rsplit('.', 1)[1].lower() in {'mp4', 'mov'}
 
-# Ścieżki do modeli
+# Ścieżka do modelu
 fastai_model_path = os.path.join(app.config['MODEL_PATH'], 'klasyfikator_zwierząt.pkl')
-yolo_model_path = os.path.join(app.config['MODEL_PATH'], 'yolov5s.pt')
 
 # Ładowanie modelu fastai (jeśli istnieje)
 fastai_model = None
@@ -45,23 +44,6 @@ try:
         fastai_model = load_learner(fastai_model_path)
 except Exception as e:
     print(f"Błąd ładowania modelu fastai: {e}")
-
-# Ładowanie lub pobieranie modelu YOLOv5
-yolo_model = None
-def load_yolo_model():
-    global yolo_model
-    try:
-        if not os.path.exists(yolo_model_path):
-            print("Pobieranie modelu YOLOv5...")
-            yolo_model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
-            # Zapisanie modelu
-            torch.save(yolo_model.state_dict(), yolo_model_path)
-        else:
-            yolo_model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
-        return True
-    except Exception as e:
-        print(f"Błąd ładowania modelu YOLOv5: {e}")
-        return False
 
 @app.route('/')
 def index():
@@ -114,14 +96,13 @@ def classify_image():
 
 @app.route('/detect', methods=['POST'])
 def detect_objects():
-    """Detekcja obiektów przy użyciu modelu YOLOv5"""
+    """Analiza wideo lub obrazu przy użyciu modelu fastai"""
     if 'file' not in request.files:
         return jsonify({'error': 'Brak pliku'}), 400
     
-    # Ładowanie modelu YOLOv5 (jeśli nie jest załadowany)
-    if yolo_model is None:
-        if not load_yolo_model():
-            return jsonify({'error': 'Nie można załadować modelu YOLOv5'}), 500
+    # Sprawdzenie, czy model jest załadowany
+    if fastai_model is None:
+        return jsonify({'error': 'Model klasyfikacji nie jest załadowany'}), 500
     
     # Obsługa przesłanego pliku
     file = request.files['file']
@@ -142,55 +123,53 @@ def detect_objects():
         
         # Sprawdzenie czy to wideo
         if is_video_file(file.filename):
-            output_path = process_video(file_path)
-            if output_path:
+            # Przetwarzanie wideo - klasyfikacja losowych klatek
+            result = process_video(file_path)
+            if result:
                 os.remove(file_path)  # Usunięcie oryginalnego wideo
-                filename = os.path.basename(output_path)
-                return jsonify({
-                    'filename': filename,
-                    'source': 'upload'
-                })
+                return jsonify(result)
             else:
                 return jsonify({'error': 'Nie udało się przetworzyć wideo'}), 500
         else:
-            # Detekcja na obrazie
-            results = yolo_model(file_path)
+            # Klasyfikacja obrazu
+            img = PILImage.create(file_path)
+            pred, pred_idx, probs = fastai_model.predict(img)
             
-            # Zapisanie wyników
-            results_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'processed')
-            results.save(save_dir=results_dir)
+            # Zapisanie obrazu wynikowego z adnotacją
+            frame = cv2.imread(file_path)
+            if frame is not None:
+                # Dodanie etykiety z klasyfikacją
+                label = f"{str(pred)} ({probs[pred_idx]*100:.2f}%)"
+                cv2.putText(
+                    frame, label, 
+                    (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 
+                    1, (0, 255, 0), 2
+                )
+                
+                # Zapisanie przetworzonego obrazu
+                processed_filename = f"processed_{unique_filename}"
+                processed_path = os.path.join(
+                    app.config['UPLOAD_FOLDER'], 'processed', processed_filename
+                )
+                cv2.imwrite(processed_path, frame)
+                
+                return jsonify({
+                    'filename': processed_filename,
+                    'prediction': str(pred),
+                    'probability': float(probs[pred_idx])
+                })
             
-            # Znalezienie nazwy zapisanego pliku
-            results_filename = None
-            for f in os.listdir(results_dir):
-                if f.startswith(unique_filename.split('.')[0]):
-                    results_filename = f
-                    break
-            
-            if not results_filename:
-                return jsonify({'error': 'Nie udało się zapisać wyników detekcji'}), 500
-            
-            # Przefiltrowanie wyników (tylko zwierzęta)
-            animals = []
-            for *box, conf, cls in results.xyxy[0]:
-                class_name = results.names[int(cls)]
-                if class_name in ['dog', 'cat', 'bird']:
-                    animals.append({
-                        'class': class_name,
-                        'confidence': float(conf)
-                    })
-            
+            # Jeśli nie udało się przetworzyć obrazu
             return jsonify({
-                'filename': results_filename,
-                'source': 'upload',
-                'animals': animals
+                'prediction': str(pred),
+                'probability': float(probs[pred_idx])
             })
     except Exception as e:
         print(f"Błąd podczas przetwarzania: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 def process_video(video_path):
-    """Przetwarzanie wideo z detekcją obiektów"""
+    """Przetwarzanie wideo z klasyfikacją losowych klatek"""
     try:
         # Sprawdzenie czy plik istnieje
         if not os.path.exists(video_path):
@@ -255,8 +234,6 @@ def process_video(video_path):
         
         # Próba użycia różnych kodeków
         out = None
-        used_codec = None
-        used_ext = None
         
         for codec, ext in codecs:
             try:
@@ -267,8 +244,6 @@ def process_video(video_path):
                 
                 if out and out.isOpened():
                     temp_output_path = test_path
-                    used_codec = codec
-                    used_ext = ext
                     print(f"Udane otwarcie pliku wyjściowego MP4 z kodekiem {codec}")
                     break
                 else:
@@ -286,88 +261,103 @@ def process_video(video_path):
             cap.release()
             return None
         
-        # Klasy zwierząt, które nas interesują
-        animal_classes = ['dog', 'cat', 'bird']
-        animal_class_indices = [
-            yolo_model.names.index(cls) if cls in yolo_model.names else -1 
-            for cls in animal_classes
-        ]
-        animal_class_indices = [idx for idx in animal_class_indices if idx != -1]
+        # Wybierz 15 losowych indeksów klatek do analizy
+        if total_frames <= 15:
+            frame_indices = list(range(int(total_frames)))
+        else:
+            frame_indices = sorted(random.sample(range(int(total_frames)), 15))
         
-        frame_count = 0
-        processed_count = 0
-        # Przetwarzamy mniej klatek dla dużych wideo, ale co najmniej 30
-        sample_rate = max(1, total_frames // min(300, total_frames))
-        
-        print(f"Rozpoczynam przetwarzanie wideo, sampling rate: {sample_rate}")
-        
-        # Zmienna, która zapamięta, czy co najmniej jedna klatka została zapisana
+        # Przygotowanie do zliczania wyników klasyfikacji
+        predictions = {}
+        processed_frames = 0
         frames_written = 0
         
+        # Aktualny indeks klatki
+        current_frame = 0
+        
+        # Lista na zapamiętanie wybranych klatek do późniejszego zapisu
+        selected_frames = []
+        
+        print(f"Rozpoczynam analizę losowych klatek. Wybranych klatek: {len(frame_indices)}")
+        
+        # Odczytywanie kolejnych klatek
         while True:
             ret, frame = cap.read()
             if not ret:
                 break
             
-            frame_count += 1
-            
-            # Przetwarzamy co sample_rate klatek
-            if frame_count % sample_rate != 0:
-                continue
-            
-            processed_count += 1
-            
-            # Zmiana rozmiaru klatki
-            frame = cv2.resize(frame, (width, height))
-            
-            # Detekcja obiektów
-            results = yolo_model(frame)
-            
-            # Rysowanie prostokątów i etykiet
-            detections = results.xyxy[0].cpu().numpy()
-            animals_detected = False
-            
-            for *xyxy, conf, cls_idx in detections:
-                if int(cls_idx) in animal_class_indices and conf > 0.25:  # Obniżony próg pewności
-                    animals_detected = True
-                    x1, y1, x2, y2 = map(int, xyxy)
-                    label = f"{yolo_model.names[int(cls_idx)]} {conf:.2f}"
-                    
-                    # Określenie koloru na podstawie klasy
-                    if yolo_model.names[int(cls_idx)] == 'dog':
-                        color = (0, 255, 0)  # Zielony dla psów
-                    elif yolo_model.names[int(cls_idx)] == 'cat':
-                        color = (0, 0, 255)  # Czerwony dla kotów
-                    elif yolo_model.names[int(cls_idx)] == 'bird':
-                        color = (255, 0, 0)  # Niebieski dla ptaków
-                    else:
-                        color = (255, 255, 0)  # Żółty dla innych
-                    
-                    # Narysowanie prostokąta i etykiety
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-                    cv2.putText(
-                        frame, label, (x1, y1 - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2
+            # Sprawdź, czy aktualna klatka jest jedną z wybranych do analizy
+            if current_frame in frame_indices:
+                processed_frames += 1
+                print(f"Przetwarzanie klatki {current_frame}")
+                
+                # Zmiana rozmiaru klatki
+                resized_frame = cv2.resize(frame, (width, height))
+                
+                # Konwersja klatki na format PIL i klasyfikacja
+                try:
+                    # Zapisz klatkę tymczasowo jako plik
+                    temp_frame_path = os.path.join(
+                        app.config['UPLOAD_FOLDER'], f"temp_frame_{current_frame}.jpg"
                     )
+                    cv2.imwrite(temp_frame_path, resized_frame)
+                    
+                    # Klasyfikacja klatki
+                    img = PILImage.create(temp_frame_path)
+                    pred, pred_idx, probs = fastai_model.predict(img)
+                    
+                    # Aktualizacja słownika predykcji
+                    class_name = str(pred)
+                    if class_name in predictions:
+                        predictions[class_name] = predictions[class_name] + float(probs[pred_idx])
+                    else:
+                        predictions[class_name] = float(probs[pred_idx])
+                    
+                    # Dodanie etykiety z klasyfikacją na klatce
+                    label = f"{class_name} ({probs[pred_idx]*100:.2f}%)"
+                    cv2.putText(
+                        resized_frame, label,
+                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
+                        1, (0, 255, 0), 2
+                    )
+                    
+                    # Zapamiętanie klatki z etykietą
+                    selected_frames.append((current_frame, resized_frame.copy()))
+                    
+                    # Usunięcie tymczasowego pliku
+                    os.remove(temp_frame_path)
+                    
+                except Exception as e:
+                    print(f"Błąd klasyfikacji klatki {current_frame}: {str(e)}")
             
-            # Dodanie informacji tekstowej na klatce
+            current_frame += 1
+        
+        # Jeśli nie przetworzono żadnej klatki
+        if processed_frames == 0:
+            print("Nie przetworzono żadnej klatki")
+            cap.release()
+            out.release()
+            return None
+        
+        # Znajdź najczęściej występującą klasę
+        best_prediction = max(predictions.items(), key=lambda x: x[1])
+        best_class = best_prediction[0]
+        best_probability = best_prediction[1] / processed_frames
+        
+        print(f"Wynik klasyfikacji: {best_class} z prawdopodobieństwem {best_probability:.2f}")
+        
+        # Zapisz wszystkie wybrane klatki do wideo wynikowego
+        for idx, (frame_idx, frame) in enumerate(selected_frames):
+            # Dodaj numer klatki i wynik klasyfikacji
             cv2.putText(
-                frame, f"Klatka: {frame_count}/{total_frames}",
-                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2
+                frame, f"Klatka {frame_idx}/{total_frames}",
+                (10, height - 10), cv2.FONT_HERSHEY_SIMPLEX,
+                0.5, (255, 255, 255), 1
             )
             
-            # Zapisanie klatki
+            # Zapisz klatkę do wideo
             out.write(frame)
             frames_written += 1
-            
-            # Sprawdzenie co 50 klatek czy zapisywanie działa
-            if processed_count % 50 == 0:
-                print(f"Przetworzono {processed_count} klatek, zapisano {frames_written}")
-            
-            # Ograniczenie maksymalnej liczby klatek do 1000 (dla bezpieczeństwa)
-            if processed_count >= 1000:
-                print("Osiągnięto limit 1000 przetworzonych klatek")
-                break
         
         # Zwolnienie zasobów
         cap.release()
@@ -384,7 +374,11 @@ def process_video(video_path):
             # Sprawdź, czy plik awaryjny został pomyślnie utworzony
             if fallback_path and os.path.exists(fallback_path) and os.path.getsize(fallback_path) > 0:
                 print(f"Utworzono awaryjne wideo zamiast: {fallback_path}")
-                return fallback_path
+                return {
+                    'filename': os.path.basename(fallback_path),
+                    'prediction': 'błąd',
+                    'probability': 0.0
+                }
             else:
                 print("Nie udało się utworzyć nawet awaryjnego wideo")
                 return None
@@ -415,12 +409,16 @@ def process_video(video_path):
             # Jeśli nie udało się przenieść, spróbuj zwrócić ścieżkę do pliku tymczasowego
             if os.path.exists(temp_output_path) and os.path.getsize(temp_output_path) > 0:
                 print(f"Zwracam ścieżkę do pliku tymczasowego: {temp_output_path}")
-                return temp_output_path
+                output_path = temp_output_path
             else:
                 print("Nie można zwrócić nawet ścieżki tymczasowej")
                 return None
             
-        return output_path
+        return {
+            'filename': os.path.basename(output_path),
+            'prediction': best_class,
+            'probability': best_probability
+        }
         
     except Exception as e:
         print(f"Błąd podczas przetwarzania wideo: {str(e)}")
@@ -531,11 +529,9 @@ def processed_file(filename):
 def status():
     """Sprawdzenie statusu modeli"""
     fastai_status = 'loaded' if fastai_model is not None else 'not_loaded'
-    yolo_status = 'loaded' if yolo_model is not None else 'not_loaded'
     
     return jsonify({
-        'fastai_model': fastai_status,
-        'yolo_model': yolo_status
+        'fastai_model': fastai_status
     })
 
 @app.route('/load_models')
@@ -581,23 +577,14 @@ def load_models():
         except Exception as e:
             return jsonify({'error': f'Błąd ładowania modelu: {str(e)}'}), 500
     
-    # Ładowanie modelu YOLOv5
-    if not load_yolo_model():
-        return jsonify({'error': 'Nie można załadować modelu YOLOv5'}), 500
-    
     return jsonify({
-        'fastai_model': 'loaded',
-        'yolo_model': 'loaded'
+        'fastai_model': 'loaded'
     })
 
 if __name__ == '__main__':
-    # Sprawdzenie czy modele są załadowane przy starcie
+    # Sprawdzenie czy model jest załadowany przy starcie
     if fastai_model is None:
         print("Model fastai nie jest załadowany. " + 
-              "Spróbuj załadować ręcznie przez /load_models")
-    
-    if yolo_model is None:
-        print("Model YOLOv5 nie jest załadowany. " + 
               "Spróbuj załadować ręcznie przez /load_models")
     
     app.run(debug=True, host='0.0.0.0', port=5000) 
