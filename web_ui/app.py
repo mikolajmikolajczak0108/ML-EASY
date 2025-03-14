@@ -3,12 +3,15 @@ import cv2
 import uuid
 import shutil
 import random
-from flask import Flask, render_template, request, jsonify, send_from_directory
+import requests
+import zipfile
+import io
+from flask import Flask, render_template, request, jsonify, send_from_directory, redirect, url_for
 from werkzeug.utils import secure_filename
 import numpy as np
 
 # Importy dla fastai
-from fastai.vision.all import load_learner, PILImage
+from fastai.vision.all import load_learner, PILImage, ImageDataLoaders, vision_learner, error_rate, Resize, RandomResizedCrop, imagenet_stats, models, get_image_files, DataBlock, Categorize, CategoryBlock, ImageBlock
 
 # Konfiguracja aplikacji
 app = Flask(__name__)
@@ -18,11 +21,29 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # limit 16MB
 app.config['ALLOWED_EXTENSIONS'] = {'png', 'jpg', 'jpeg', 'gif', 'mp4', 'mov'}
 app.config['MODEL_PATH'] = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), 'models')
+app.config['DATASET_PATH'] = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), 'datasets')
 
 # Tworzenie katalogów
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs(app.config['MODEL_PATH'], exist_ok=True)
+os.makedirs(app.config['DATASET_PATH'], exist_ok=True)
 os.makedirs(os.path.join(app.config['UPLOAD_FOLDER'], 'processed'), exist_ok=True)
+
+# Lista dostępnych architektur modeli
+AVAILABLE_MODELS = {
+    'resnet18': models.resnet18,
+    'resnet34': models.resnet34,
+    'resnet50': models.resnet50,
+    'mobilenet_v2': models.mobilenet_v2,
+    'densenet121': models.densenet121
+}
+
+# Standardowe linki do przykładowych datasetów
+EXAMPLE_DATASETS = {
+    'macbook_air_pro': 'https://storage.googleapis.com/ml-easy-datasets/macbooks_dataset.zip',
+    'iphone_models': 'https://storage.googleapis.com/ml-easy-datasets/iphone_dataset.zip'
+}
 
 def allowed_file(filename):
     """Sprawdza czy rozszerzenie pliku jest dozwolone"""
@@ -45,10 +66,50 @@ try:
 except Exception as e:
     print(f"Błąd ładowania modelu fastai: {e}")
 
+# Funkcja do pobierania i rozpakowania przykładowego datasetu
+def download_and_extract_dataset(dataset_name, dataset_url):
+    """Pobiera i rozpakowuje przykładowy dataset"""
+    dataset_dir = os.path.join(app.config['DATASET_PATH'], dataset_name)
+    
+    if os.path.exists(dataset_dir):
+        print(f"Dataset {dataset_name} już istnieje")
+        return True
+    
+    try:
+        os.makedirs(dataset_dir, exist_ok=True)
+        print(f"Pobieranie datasetu {dataset_name}...")
+        
+        response = requests.get(dataset_url, stream=True)
+        if response.status_code == 200:
+            z = zipfile.ZipFile(io.BytesIO(response.content))
+            z.extractall(dataset_dir)
+            print(f"Dataset {dataset_name} został pomyślnie rozpakowany")
+            return True
+        else:
+            print(f"Błąd pobierania datasetu: {response.status_code}")
+            return False
+    except Exception as e:
+        print(f"Błąd podczas pobierania/rozpakowywania datasetu: {e}")
+        return False
+
+# Pobieranie dostępnych modeli i datasetów
+def get_available_resources():
+    """Pobiera listę dostępnych modeli i datasetów"""
+    models = [f for f in os.listdir(app.config['MODEL_PATH']) 
+             if f.endswith('.pkl')]
+    
+    datasets = []
+    if os.path.exists(app.config['DATASET_PATH']):
+        datasets = [d for d in os.listdir(app.config['DATASET_PATH']) 
+                   if os.path.isdir(os.path.join(app.config['DATASET_PATH'], d))]
+    
+    return {'models': models, 'datasets': datasets}
+
 @app.route('/')
 def index():
     """Strona główna"""
-    return render_template('index.html')
+    resources = get_available_resources()
+    return render_template('index.html', resources=resources, architectures=list(AVAILABLE_MODELS.keys()))
 
 @app.route('/classify', methods=['POST'])
 def classify_image():
@@ -580,6 +641,231 @@ def load_models():
     return jsonify({
         'fastai_model': 'loaded'
     })
+
+@app.route('/datasets', methods=['GET'])
+def list_datasets():
+    """Zwraca listę dostępnych datasetów"""
+    datasets = []
+    
+    if os.path.exists(app.config['DATASET_PATH']):
+        for dataset in os.listdir(app.config['DATASET_PATH']):
+            dataset_path = os.path.join(app.config['DATASET_PATH'], dataset)
+            if os.path.isdir(dataset_path):
+                # Pobierz kategorie (podfoldery) w datasecie
+                categories = []
+                for category in os.listdir(dataset_path):
+                    category_path = os.path.join(dataset_path, category)
+                    if os.path.isdir(category_path):
+                        # Policz obrazy w kategorii
+                        image_count = len([f for f in os.listdir(category_path) 
+                                         if os.path.isfile(os.path.join(category_path, f)) and 
+                                         f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif'))])
+                        categories.append({
+                            'name': category,
+                            'image_count': image_count
+                        })
+                
+                datasets.append({
+                    'name': dataset,
+                    'categories': categories,
+                    'total_images': sum(c['image_count'] for c in categories)
+                })
+    
+    return jsonify({'datasets': datasets})
+
+@app.route('/create_dataset', methods=['POST'])
+def create_dataset():
+    """Tworzy nowy dataset"""
+    if 'dataset_name' not in request.form:
+        return jsonify({'error': 'Brak nazwy datasetu'}), 400
+    
+    dataset_name = request.form['dataset_name']
+    if not dataset_name or dataset_name.strip() == '':
+        return jsonify({'error': 'Nazwa datasetu nie może być pusta'}), 400
+    
+    # Zabezpieczenie nazwy
+    dataset_name = secure_filename(dataset_name)
+    dataset_path = os.path.join(app.config['DATASET_PATH'], dataset_name)
+    
+    if os.path.exists(dataset_path):
+        return jsonify({'error': 'Dataset o tej nazwie już istnieje'}), 400
+    
+    try:
+        os.makedirs(dataset_path, exist_ok=True)
+        return jsonify({'success': True, 'dataset_name': dataset_name})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/create_category', methods=['POST'])
+def create_category():
+    """Tworzy nową kategorię w datasecie"""
+    if 'dataset_name' not in request.form or 'category_name' not in request.form:
+        return jsonify({'error': 'Brak nazwy datasetu lub kategorii'}), 400
+    
+    dataset_name = request.form['dataset_name']
+    category_name = request.form['category_name']
+    
+    if not dataset_name or not category_name or dataset_name.strip() == '' or category_name.strip() == '':
+        return jsonify({'error': 'Nazwa datasetu i kategorii nie mogą być puste'}), 400
+    
+    # Zabezpieczenie nazw
+    dataset_name = secure_filename(dataset_name)
+    category_name = secure_filename(category_name)
+    
+    dataset_path = os.path.join(app.config['DATASET_PATH'], dataset_name)
+    if not os.path.exists(dataset_path):
+        return jsonify({'error': 'Dataset nie istnieje'}), 404
+    
+    category_path = os.path.join(dataset_path, category_name)
+    if os.path.exists(category_path):
+        return jsonify({'error': 'Kategoria o tej nazwie już istnieje w tym datasecie'}), 400
+    
+    try:
+        os.makedirs(category_path, exist_ok=True)
+        return jsonify({'success': True, 'dataset_name': dataset_name, 'category_name': category_name})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/upload_to_category', methods=['POST'])
+def upload_to_category():
+    """Dodaje obrazy do kategorii w datasecie"""
+    if 'dataset_name' not in request.form or 'category_name' not in request.form:
+        return jsonify({'error': 'Brak nazwy datasetu lub kategorii'}), 400
+    
+    if 'files[]' not in request.files:
+        return jsonify({'error': 'Brak plików'}), 400
+    
+    dataset_name = request.form['dataset_name']
+    category_name = request.form['category_name']
+    
+    # Zabezpieczenie nazw
+    dataset_name = secure_filename(dataset_name)
+    category_name = secure_filename(category_name)
+    
+    category_path = os.path.join(app.config['DATASET_PATH'], dataset_name, category_name)
+    if not os.path.exists(category_path):
+        return jsonify({'error': 'Kategoria nie istnieje'}), 404
+    
+    files = request.files.getlist('files[]')
+    saved_files = []
+    
+    for file in files:
+        if file and allowed_file(file.filename) and not is_video_file(file.filename):
+            filename = secure_filename(file.filename)
+            unique_filename = f"{uuid.uuid4()}_{filename}"
+            file_path = os.path.join(category_path, unique_filename)
+            file.save(file_path)
+            saved_files.append(unique_filename)
+    
+    return jsonify({
+        'success': True, 
+        'saved_files': saved_files,
+        'dataset_name': dataset_name,
+        'category_name': category_name
+    })
+
+@app.route('/download_example_dataset', methods=['POST'])
+def download_example_dataset():
+    """Pobiera przykładowy dataset"""
+    if 'dataset_type' not in request.form:
+        return jsonify({'error': 'Nie wybrano typu datasetu'}), 400
+    
+    dataset_type = request.form['dataset_type']
+    
+    if dataset_type not in EXAMPLE_DATASETS:
+        return jsonify({'error': 'Nieznany typ datasetu'}), 400
+    
+    dataset_url = EXAMPLE_DATASETS[dataset_type]
+    success = download_and_extract_dataset(dataset_type, dataset_url)
+    
+    if success:
+        return jsonify({'success': True, 'dataset_name': dataset_type})
+    else:
+        return jsonify({'error': 'Błąd podczas pobierania datasetu'}), 500
+
+@app.route('/train_model', methods=['POST'])
+def train_model():
+    """Trenuje model na wybranym datasecie"""
+    if 'dataset_name' not in request.form:
+        return jsonify({'error': 'Nie wybrano datasetu'}), 400
+    
+    dataset_name = request.form['dataset_name']
+    model_name = request.form.get('model_name', f"model_{dataset_name}_{uuid.uuid4()}")
+    architecture = request.form.get('architecture', 'resnet34')
+    epochs = int(request.form.get('epochs', 5))
+    batch_size = int(request.form.get('batch_size', 16))
+    
+    # Zabezpieczenie nazw
+    dataset_name = secure_filename(dataset_name)
+    model_name = secure_filename(model_name)
+    
+    dataset_path = os.path.join(app.config['DATASET_PATH'], dataset_name)
+    if not os.path.exists(dataset_path):
+        return jsonify({'error': 'Dataset nie istnieje'}), 404
+    
+    if architecture not in AVAILABLE_MODELS:
+        return jsonify({'error': 'Nieznana architektura modelu'}), 400
+    
+    # Sprawdź czy dataset zawiera co najmniej 2 kategorie
+    categories = [d for d in os.listdir(dataset_path) 
+                 if os.path.isdir(os.path.join(dataset_path, d))]
+    
+    if len(categories) < 2:
+        return jsonify({'error': 'Dataset musi zawierać co najmniej 2 kategorie'}), 400
+    
+    try:
+        # Przygotowanie danych
+        dblock = DataBlock(
+            blocks=(ImageBlock, CategoryBlock),
+            get_items=get_image_files,
+            splitter=RandomSplitter(valid_pct=0.2, seed=42),
+            get_y=parent_label,
+            item_tfms=[Resize(224)],
+            batch_tfms=[*aug_transforms(), Normalize.from_stats(*imagenet_stats)]
+        )
+        
+        # Tworzenie dataloadera
+        dls = dblock.dataloaders(dataset_path, bs=batch_size)
+        
+        # Tworzenie modelu
+        model_func = AVAILABLE_MODELS[architecture]
+        learn = vision_learner(dls, model_func, metrics=error_rate)
+        
+        # Trenowanie modelu
+        learn.fine_tune(epochs)
+        
+        # Zapisanie modelu
+        model_path = os.path.join(app.config['MODEL_PATH'], f"{model_name}.pkl")
+        learn.export(model_path)
+        
+        return jsonify({
+            'success': True, 
+            'model_name': f"{model_name}.pkl",
+            'accuracy': float(1 - learn.validate()[1]),
+            'categories': categories
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/load_model', methods=['POST'])
+def load_model():
+    """Ładuje wybrany model do użycia"""
+    if 'model_name' not in request.form:
+        return jsonify({'error': 'Nie wybrano modelu'}), 400
+    
+    model_name = request.form['model_name']
+    
+    model_path = os.path.join(app.config['MODEL_PATH'], model_name)
+    if not os.path.exists(model_path):
+        return jsonify({'error': 'Model nie istnieje'}), 404
+    
+    try:
+        global fastai_model
+        fastai_model = load_learner(model_path)
+        return jsonify({'success': True, 'model_name': model_name})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     # Sprawdzenie czy model jest załadowany przy starcie

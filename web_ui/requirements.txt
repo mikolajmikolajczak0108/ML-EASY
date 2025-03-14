@@ -5,4 +5,5 @@ torch==1.9.0
 torchvision==0.10.0
 fastai==2.5.2
 numpy==1.21.2
-Werkzeug==2.0.1 
+Werkzeug==2.0.1
+requests==2.26.0 
