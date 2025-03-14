@@ -135,8 +135,100 @@ def batch_classify():
         models = get_available_models()
         return render_template('batch_classify.html', models=models)
     
-    # POST request handling will be implemented in the next phase
+    # Process the batch of images
+    if 'model' not in request.form:
+        return jsonify({
+            'success': False,
+            'error': 'No model selected'
+        }), 400
+    
+    model_name = request.form.get('model')
+    
+    # Check if files were uploaded
+    if 'files[]' not in request.files:
+        return jsonify({
+            'success': False,
+            'error': 'No files uploaded'
+        }), 400
+    
+    files = request.files.getlist('files[]')
+    if not files or files[0].filename == '':
+        return jsonify({
+            'success': False,
+            'error': 'No files selected'
+        }), 400
+    
+    # Load the model
+    model = load_model(model_name)
+    if model is None:
+        return jsonify({
+            'success': False,
+            'error': 'Failed to load model'
+        }), 500
+    
+    # Process each image
+    results = []
+    class_counts = {}
+    total_confidence = 0
+    
+    from fastai.vision.all import PILImage
+    
+    for file in files:
+        if not allowed_file(file.filename):
+            continue
+        
+        try:
+            # Save the file
+            file_path = save_uploaded_file(file)
+            
+            # Skip video files
+            if is_video_file(file.filename):
+                continue
+            
+            # Create a PILImage and predict
+            img = PILImage.create(file_path)
+            pred_class, pred_idx, outputs = model.predict(img)
+            
+            # Get confidence score for the prediction
+            confidence = float(outputs[pred_idx])
+            total_confidence += confidence
+            
+            # Update class counts
+            class_name = str(pred_class)
+            if class_name in class_counts:
+                class_counts[class_name] += 1
+            else:
+                class_counts[class_name] = 1
+            
+            # Get all confidence scores
+            confidences = {
+                model.dls.vocab[i]: float(outputs[i]) 
+                for i in range(len(outputs))
+            }
+            
+            # Add to results
+            results.append({
+                'filename': file.filename,
+                'prediction': class_name,
+                'confidence': confidence,
+                'confidences': confidences,
+                'file_path': file_path.replace('\\', '/')
+            })
+            
+        except Exception as e:
+            # Skip files that cause errors
+            continue
+    
+    # Calculate statistics
+    num_processed = len(results)
+    avg_confidence = total_confidence / num_processed if num_processed > 0 else 0
+    
     return jsonify({
-        'success': False,
-        'error': 'Batch classification not implemented yet'
-    }), 501 
+        'success': True,
+        'results': results,
+        'stats': {
+            'processed_count': num_processed,
+            'average_confidence': avg_confidence,
+            'class_distribution': class_counts
+        }
+    }) 

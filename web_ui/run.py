@@ -19,7 +19,9 @@ def check_module(module_name):
 def install_requirements():
     """Install required dependencies."""
     try:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
+        subprocess.check_call([
+            sys.executable, "-m", "pip", "install", "-r", "requirements.txt"
+        ])
         return True
     except subprocess.CalledProcessError:
         return False
@@ -27,7 +29,10 @@ def install_requirements():
 
 def check_dependencies():
     """Check required dependencies and install them if needed."""
-    required_modules = ["flask", "torch", "fastai", "opencv-python", "numpy", "Pillow"]
+    required_modules = [
+        "flask", "torch", "fastai", "opencv-python", 
+        "numpy", "Pillow"
+    ]
     missing_modules = []
     
     for module in required_modules:
@@ -41,7 +46,8 @@ def check_dependencies():
         if install_requirements():
             print("Dependencies installed successfully.")
         else:
-            print("Error installing dependencies. Try installing them manually:")
+            print("Error installing dependencies.")
+            print("Try installing them manually:")
             print("pip install -r requirements.txt")
             return False
     
@@ -51,8 +57,12 @@ def check_dependencies():
 def setup_folders():
     """Create required folders."""
     folders = ["uploads", "uploads/processed", "models", "datasets"]
+    base_path = os.path.dirname(os.path.abspath(__file__))
     for folder in folders:
-        os.makedirs(os.path.join(os.path.dirname(os.path.abspath(__file__)), folder), exist_ok=True)
+        os.makedirs(
+            os.path.join(base_path, folder), 
+            exist_ok=True
+        )
 
 
 def run_app():
@@ -71,6 +81,17 @@ def run_app():
 
 if __name__ == "__main__":
     print("=== ML-EASY - Machine Learning Made Easy ===")
+    
+    # Rename old app.py file if it exists
+    base_path = os.path.dirname(os.path.abspath(__file__))
+    old_app_path = os.path.join(base_path, 'app.py')
+    if os.path.exists(old_app_path):
+        backup_path = os.path.join(base_path, 'app.py.bak')
+        try:
+            os.rename(old_app_path, backup_path)
+            print("Renamed old app.py to app.py.bak")
+        except Exception as e:
+            print(f"Warning: Could not rename old app.py: {e}")
     
     # Check dependencies
     if not check_dependencies():
