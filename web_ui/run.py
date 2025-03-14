@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Skrypt uruchamiający aplikację webową do rozpoznawania zwierząt
+Script to run the ML-EASY web application.
 """
 
 import os
@@ -10,21 +10,24 @@ import sys
 import subprocess
 import importlib.util
 
+
 def check_module(module_name):
-    """Sprawdza czy moduł jest zainstalowany"""
+    """Check if a module is installed."""
     return importlib.util.find_spec(module_name) is not None
 
+
 def install_requirements():
-    """Instaluje wymagane zależności"""
+    """Install required dependencies."""
     try:
         subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
         return True
     except subprocess.CalledProcessError:
         return False
 
+
 def check_dependencies():
-    """Sprawdza wymagane zależności i instaluje je w razie potrzeby"""
-    required_modules = ["flask", "torch", "fastai", "pytube", "cv2", "numpy", "PIL"]
+    """Check required dependencies and install them if needed."""
+    required_modules = ["flask", "torch", "fastai", "opencv-python", "numpy", "Pillow"]
     missing_modules = []
     
     for module in required_modules:
@@ -33,45 +36,52 @@ def check_dependencies():
             missing_modules.append(module_name)
     
     if missing_modules:
-        print(f"Brakujące moduły: {', '.join(missing_modules)}")
-        print("Instalacja wymaganych zależności...")
+        print(f"Missing modules: {', '.join(missing_modules)}")
+        print("Installing required dependencies...")
         if install_requirements():
-            print("Zależności zostały zainstalowane pomyślnie.")
+            print("Dependencies installed successfully.")
         else:
-            print("Błąd podczas instalacji zależności. Spróbuj zainstalować je ręcznie:")
+            print("Error installing dependencies. Try installing them manually:")
             print("pip install -r requirements.txt")
             return False
     
     return True
 
+
 def setup_folders():
-    """Tworzy wymagane foldery"""
-    folders = ["uploads", "uploads/processed", "models"]
+    """Create required folders."""
+    folders = ["uploads", "uploads/processed", "models", "datasets"]
     for folder in folders:
         os.makedirs(os.path.join(os.path.dirname(os.path.abspath(__file__)), folder), exist_ok=True)
 
+
 def run_app():
-    """Uruchamia aplikację Flask"""
+    """Run the Flask application."""
     try:
-        print("Uruchamianie aplikacji webowej...")
-        import app
-        app.app.run(debug=True, host='0.0.0.0', port=5000)
+        print("Starting the web application...")
+        from app import create_app
+        app = create_app()
+        app.run(debug=True, host='0.0.0.0', port=5000)
     except Exception as e:
-        print(f"Błąd podczas uruchamiania aplikacji: {e}")
+        print(f"Error starting the application: {e}")
         return False
     
     return True
 
+
 if __name__ == "__main__":
-    print("=== System Rozpoznawania Zwierząt - Aplikacja webowa ===")
+    print("=== ML-EASY - Machine Learning Made Easy ===")
     
-    # Sprawdzenie zależności
+    # Check dependencies
     if not check_dependencies():
         sys.exit(1)
     
-    # Tworzenie folderów
+    # Create folders
     setup_folders()
     
-    # Uruchomienie aplikacji
+    # Set environment variable for Flask
+    os.environ['FLASK_ENV'] = 'development'
+    
+    # Run the application
     if not run_app():
         sys.exit(1) 

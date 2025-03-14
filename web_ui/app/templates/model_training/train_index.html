@@ -1,0 +1,151 @@
+{% extends "shared/layout.html" %}
+
+{% block title %}ML-EASY - Train Models{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="/">Home</a></li>
+                <li class="breadcrumb-item active">Train Models</li>
+            </ol>
+        </nav>
+        <h1 class="mb-3">Train Models</h1>
+        <p class="lead">Create and train new machine learning models for image classification.</p>
+    </div>
+</div>
+
+<div class="row mb-5">
+    <div class="col-md-6 col-lg-4 mb-4">
+        <div class="card h-100">
+            <div class="card-body text-center">
+                <div class="display-4 text-primary mb-3">
+                    <i class="fas fa-cogs"></i>
+                </div>
+                <h5 class="card-title">Train from Scratch</h5>
+                <p class="card-text">Create a new model from scratch with your choice of architecture and dataset.</p>
+                <a href="{{ url_for('model_training.train_new_model') }}" class="btn btn-primary">
+                    <i class="fas fa-plus-circle me-2"></i>New Model
+                </a>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-6 col-lg-4 mb-4">
+        <div class="card h-100">
+            <div class="card-body text-center">
+                <div class="display-4 text-primary mb-3">
+                    <i class="fas fa-sliders-h"></i>
+                </div>
+                <h5 class="card-title">Fine-tune Model</h5>
+                <p class="card-text">Take an existing model and fine-tune it for your specific use case.</p>
+                <a href="{{ url_for('model_training.finetune_model') }}" class="btn btn-primary">
+                    <i class="fas fa-wrench me-2"></i>Fine-tune
+                </a>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-6 col-lg-4 mb-4">
+        <div class="card h-100">
+            <div class="card-body text-center">
+                <div class="display-4 text-primary mb-3">
+                    <i class="fas fa-database"></i>
+                </div>
+                <h5 class="card-title">Manage Datasets</h5>
+                <p class="card-text">Create, upload, and manage datasets for training your models.</p>
+                <a href="{{ url_for('model_training.list_datasets') }}" class="btn btn-primary">
+                    <i class="fas fa-folder-open me-2"></i>Datasets
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Training Options</h5>
+            </div>
+            <div class="card-body">
+                <h5 class="mb-3">Available Architectures</h5>
+                <div class="row mb-4">
+                    {% for arch in architectures %}
+                    <div class="col-md-4 mb-3">
+                        <div class="model-card">
+                            <h5>{{ arch }}</h5>
+                            <p class="text-muted mb-2">
+                                {% if 'resnet' in arch %}
+                                ResNet architecture with {{ arch|replace('resnet', '') }} layers
+                                {% elif 'mobilenet' in arch %}
+                                Lightweight mobile-optimized architecture
+                                {% elif 'densenet' in arch %}
+                                Dense architecture with {{ arch|replace('densenet', '') }} layers
+                                {% else %}
+                                Neural network architecture
+                                {% endif %}
+                            </p>
+                            <div>
+                                {% if 'resnet18' == arch %}
+                                <span class="badge bg-success">Fast</span>
+                                <span class="badge bg-warning text-dark">Lower Accuracy</span>
+                                {% elif 'resnet50' == arch %}
+                                <span class="badge bg-warning text-dark">Slower</span>
+                                <span class="badge bg-success">Higher Accuracy</span>
+                                {% elif 'mobilenet' in arch %}
+                                <span class="badge bg-success">Mobile-Friendly</span>
+                                <span class="badge bg-info">Optimized</span>
+                                {% elif 'densenet' in arch %}
+                                <span class="badge bg-info">Feature Reuse</span>
+                                <span class="badge bg-success">Efficient</span>
+                                {% else %}
+                                <span class="badge bg-primary">Standard</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                
+                <h5 class="mb-3">Training Parameters</h5>
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="card mb-3">
+                            <div class="card-body">
+                                <h6 class="card-title">Learning Rate</h6>
+                                <p class="card-text">Controls how quickly the model adapts to the problem. A typical range is from 0.01 to 0.0001.</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card mb-3">
+                            <div class="card-body">
+                                <h6 class="card-title">Batch Size</h6>
+                                <p class="card-text">The number of samples processed before the model is updated. Common values are 16, 32, or 64.</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card mb-3">
+                            <div class="card-body">
+                                <h6 class="card-title">Epochs</h6>
+                                <p class="card-text">The number of times the learning algorithm will work through the entire training dataset.</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card mb-3">
+                            <div class="card-body">
+                                <h6 class="card-title">Image Size</h6>
+                                <p class="card-text">The size to which images are resized for training. Common values are 224x224 or 256x256 pixels.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %} 

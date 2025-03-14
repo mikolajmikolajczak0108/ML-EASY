@@ -1,0 +1,122 @@
+{% extends "shared/layout.html" %}
+
+{% block title %}ML-EASY - Contact Us{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="/">Home</a></li>
+                <li class="breadcrumb-item active">Contact</li>
+            </ol>
+        </nav>
+        <h1 class="mb-3">Contact Us</h1>
+        <p class="lead">Have questions, feedback, or need support? We're here to help!</p>
+    </div>
+</div>
+
+<div class="row mb-5">
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Send a Message</h5>
+            </div>
+            <div class="card-body">
+                <form id="contact-form">
+                    <div class="mb-3">
+                        <label for="name" class="form-label">Your Name</label>
+                        <input type="text" class="form-control" id="name" name="name" required>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="email" class="form-label">Email Address</label>
+                        <input type="email" class="form-control" id="email" name="email" required>
+                        <div class="form-text">We'll never share your email with anyone else.</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="subject" class="form-label">Subject</label>
+                        <select class="form-select" id="subject" name="subject" required>
+                            <option value="" selected disabled>Choose a subject...</option>
+                            <option value="general">General Inquiry</option>
+                            <option value="support">Technical Support</option>
+                            <option value="feedback">Feedback</option>
+                            <option value="feature">Feature Request</option>
+                            <option value="bug">Bug Report</option>
+                        </select>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="message" class="form-label">Message</label>
+                        <textarea class="form-control" id="message" name="message" rows="5" required></textarea>
+                    </div>
+                    
+                    <div class="text-end">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-paper-plane me-2"></i>Send Message
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-4">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">Contact Information</h5>
+            </div>
+            <div class="card-body">
+                <ul class="list-unstyled">
+                    <li class="mb-3">
+                        <i class="fas fa-envelope text-primary me-2"></i>
+                        <a href="mailto:info@ml-easy.com">info@ml-easy.com</a>
+                    </li>
+                    <li class="mb-3">
+                        <i class="fas fa-globe text-primary me-2"></i>
+                        <a href="https://www.ml-easy.com" target="_blank">www.ml-easy.com</a>
+                    </li>
+                    <li>
+                        <i class="fas fa-map-marker-alt text-primary me-2"></i>
+                        ML-EASY Headquarters<br>
+                        <span class="ms-4">123 AI Street</span><br>
+                        <span class="ms-4">Tech City, TC 12345</span>
+                    </li>
+                </ul>
+            </div>
+        </div>
+        
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Connect With Us</h5>
+            </div>
+            <div class="card-body">
+                <div class="d-flex justify-content-around">
+                    <a href="#" class="text-decoration-none">
+                        <i class="fab fa-github fa-2x text-dark"></i>
+                    </a>
+                    <a href="#" class="text-decoration-none">
+                        <i class="fab fa-twitter fa-2x text-info"></i>
+                    </a>
+                    <a href="#" class="text-decoration-none">
+                        <i class="fab fa-linkedin fa-2x text-primary"></i>
+                    </a>
+                    <a href="#" class="text-decoration-none">
+                        <i class="fab fa-youtube fa-2x text-danger"></i>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.getElementById('contact-form').addEventListener('submit', function(event) {
+        event.preventDefault();
+        alert('Thank you for your message! This feature is not yet implemented, but we will get back to you soon.');
+    });
+</script>
+{% endblock %} 

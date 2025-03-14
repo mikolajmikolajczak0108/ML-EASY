@@ -1,0 +1,117 @@
+{% extends "shared/layout.html" %}
+
+{% block title %}ML-EASY - About{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="/">Home</a></li>
+                <li class="breadcrumb-item active">About</li>
+            </ol>
+        </nav>
+        <h1 class="mb-3">About ML-EASY</h1>
+    </div>
+</div>
+
+<div class="row mb-5">
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-body">
+                <h2 class="h4 mb-4">Our Mission</h2>
+                <p class="lead">
+                    ML-EASY aims to make machine learning accessible to everyone, regardless of their technical background.
+                </p>
+                <p>
+                    We believe that artificial intelligence and machine learning should be tools that anyone can use to solve problems and create innovative solutions. Our platform simplifies the process of testing and training machine learning models for image classification, making it easy for beginners to get started and for experts to iterate quickly.
+                </p>
+                
+                <h2 class="h4 mt-5 mb-4">Key Features</h2>
+                <ul class="list-group list-group-flush mb-4">
+                    <li class="list-group-item">
+                        <i class="fas fa-check-circle text-success me-2"></i>
+                        <strong>Simple Testing Interface:</strong> Upload images and get instant classification results
+                    </li>
+                    <li class="list-group-item">
+                        <i class="fas fa-check-circle text-success me-2"></i>
+                        <strong>Multiple Model Architectures:</strong> Choose from various pre-built neural network architectures
+                    </li>
+                    <li class="list-group-item">
+                        <i class="fas fa-check-circle text-success me-2"></i>
+                        <strong>Easy Dataset Management:</strong> Create, upload, and manage your training datasets
+                    </li>
+                    <li class="list-group-item">
+                        <i class="fas fa-check-circle text-success me-2"></i>
+                        <strong>Fine-tuning Capabilities:</strong> Adapt existing models to your specific use cases
+                    </li>
+                    <li class="list-group-item">
+                        <i class="fas fa-check-circle text-success me-2"></i>
+                        <strong>Web Scraping Tools:</strong> Automatically collect images for your datasets
+                    </li>
+                </ul>
+                
+                <h2 class="h4 mt-5 mb-4">Technology Stack</h2>
+                <p>ML-EASY is built using modern technologies:</p>
+                <div class="row text-center">
+                    <div class="col-md-3 col-6 mb-4">
+                        <div class="p-3 border rounded">
+                            <i class="fab fa-python fa-2x text-primary mb-2"></i>
+                            <h5 class="h6">Python</h5>
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-6 mb-4">
+                        <div class="p-3 border rounded">
+                            <i class="fas fa-flask fa-2x text-primary mb-2"></i>
+                            <h5 class="h6">Flask</h5>
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-6 mb-4">
+                        <div class="p-3 border rounded">
+                            <i class="fas fa-brain fa-2x text-primary mb-2"></i>
+                            <h5 class="h6">PyTorch</h5>
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-6 mb-4">
+                        <div class="p-3 border rounded">
+                            <i class="fas fa-bolt fa-2x text-primary mb-2"></i>
+                            <h5 class="h6">FastAI</h5>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-4">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">Get Started</h5>
+            </div>
+            <div class="card-body">
+                <p>Ready to explore machine learning? Start with one of these options:</p>
+                <div class="d-grid gap-2">
+                    <a href="{{ url_for('model_testing.index') }}" class="btn btn-primary">
+                        <i class="fas fa-vial me-2"></i>Test a Model
+                    </a>
+                    <a href="{{ url_for('model_training.index') }}" class="btn btn-outline-primary">
+                        <i class="fas fa-graduation-cap me-2"></i>Train a Model
+                    </a>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Contact Us</h5>
+            </div>
+            <div class="card-body">
+                <p>Have questions or suggestions? We'd love to hear from you!</p>
+                <a href="{{ url_for('main.contact') }}" class="btn btn-outline-secondary w-100">
+                    <i class="fas fa-envelope me-2"></i>Contact Page
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %} 

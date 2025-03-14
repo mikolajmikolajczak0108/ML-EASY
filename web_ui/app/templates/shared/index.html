@@ -1,0 +1,115 @@
+{% extends "shared/layout.html" %}
+
+{% block title %}ML-EASY - Home{% endblock %}
+
+{% block content %}
+<div class="row align-items-center mb-5">
+    <div class="col-lg-6">
+        <h1 class="display-4 fw-bold mb-3">ML-EASY</h1>
+        <h2 class="fs-3 mb-4 text-secondary">Machine Learning Made Easy</h2>
+        <p class="lead mb-4">
+            A simple platform to test and train machine learning models for image classification.
+            No complex setup required - just upload your images and get results instantly.
+        </p>
+        <div class="d-grid gap-2 d-md-flex">
+            <a href="{{ url_for('model_testing.index') }}" class="btn btn-primary btn-lg px-4 me-md-2">
+                <i class="fas fa-vial me-2"></i>Test Models
+            </a>
+            <a href="{{ url_for('model_training.index') }}" class="btn btn-outline-primary btn-lg px-4">
+                <i class="fas fa-graduation-cap me-2"></i>Train Models
+            </a>
+        </div>
+    </div>
+    <div class="col-lg-6 mt-5 mt-lg-0">
+        <div class="card border-0 bg-light p-4">
+            <img src="https://cdn.pixabay.com/photo/2019/04/14/13/35/ai-4126925_1280.jpg" 
+                 class="card-img-top rounded-3" alt="AI concept image">
+            <div class="card-body text-center py-4">
+                <h3 class="card-title h5">Get Started in Minutes</h3>
+                <p class="card-text">Select a pre-trained model or train your own with just a few clicks</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<hr class="my-5">
+
+<div class="row mb-5">
+    <div class="col-12 text-center mb-4">
+        <h2 class="h3">What You Can Do</h2>
+        <p class="text-muted">Explore the features of our platform</p>
+    </div>
+    
+    <div class="col-md-4 mb-4">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex align-items-center mb-3">
+                    <span class="display-5 text-primary me-3">
+                        <i class="fas fa-vial"></i>
+                    </span>
+                    <h3 class="h5 mb-0">Test Models</h3>
+                </div>
+                <p class="card-text">Upload images to test pre-trained models and see classification results instantly.</p>
+                <ul class="list-unstyled">
+                    <li class="mb-2"><i class="fas fa-check-circle text-success me-2"></i>Single image testing</li>
+                    <li class="mb-2"><i class="fas fa-check-circle text-success me-2"></i>Batch processing</li>
+                    <li class="mb-2"><i class="fas fa-check-circle text-success me-2"></i>Performance statistics</li>
+                </ul>
+            </div>
+            <div class="card-footer bg-transparent border-0">
+                <a href="{{ url_for('model_testing.index') }}" class="btn btn-sm btn-outline-primary">
+                    Try Testing <i class="fas fa-arrow-right ms-1"></i>
+                </a>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-4 mb-4">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex align-items-center mb-3">
+                    <span class="display-5 text-primary me-3">
+                        <i class="fas fa-cogs"></i>
+                    </span>
+                    <h3 class="h5 mb-0">Train New Models</h3>
+                </div>
+                <p class="card-text">Create and train your own models using our simple interface.</p>
+                <ul class="list-unstyled">
+                    <li class="mb-2"><i class="fas fa-check-circle text-success me-2"></i>Multiple architectures</li>
+                    <li class="mb-2"><i class="fas fa-check-circle text-success me-2"></i>Fine-tuning options</li>
+                    <li class="mb-2"><i class="fas fa-check-circle text-success me-2"></i>Training visualization</li>
+                </ul>
+            </div>
+            <div class="card-footer bg-transparent border-0">
+                <a href="{{ url_for('model_training.new_model') }}" class="btn btn-sm btn-outline-primary">
+                    Train Model <i class="fas fa-arrow-right ms-1"></i>
+                </a>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-4 mb-4">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex align-items-center mb-3">
+                    <span class="display-5 text-primary me-3">
+                        <i class="fas fa-database"></i>
+                    </span>
+                    <h3 class="h5 mb-0">Manage Datasets</h3>
+                </div>
+                <p class="card-text">Create, upload, and manage datasets for training models.</p>
+                <ul class="list-unstyled">
+                    <li class="mb-2"><i class="fas fa-check-circle text-success me-2"></i>Custom dataset creation</li>
+                    <li class="mb-2"><i class="fas fa-check-circle text-success me-2"></i>Example datasets</li>
+                    <li class="mb-2"><i class="fas fa-check-circle text-success me-2"></i>Web scraping tool</li>
+                </ul>
+            </div>
+            <div class="card-footer bg-transparent border-0">
+                <a href="{{ url_for('model_training.list_datasets') }}" class="btn btn-sm btn-outline-primary">
+                    Manage Datasets <i class="fas fa-arrow-right ms-1"></i>
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %} 

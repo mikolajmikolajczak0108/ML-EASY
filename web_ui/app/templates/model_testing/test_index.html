@@ -1,0 +1,302 @@
+{% extends "shared/layout.html" %}
+
+{% block title %}ML-EASY - Test Models{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="/">Home</a></li>
+                <li class="breadcrumb-item active">Test Models</li>
+            </ol>
+        </nav>
+        <h1 class="mb-3">Test Models</h1>
+        <p class="lead">Upload images to test against trained machine learning models and see the results.</p>
+    </div>
+</div>
+
+<div class="row mb-5">
+    <div class="col-lg-8">
+        <div class="card mb-4">
+            <div class="card-header">
+                <ul class="nav nav-tabs card-header-tabs" id="modelTestTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="single-test-tab" data-bs-toggle="tab" 
+                                data-bs-target="#single-test" type="button" role="tab" 
+                                aria-controls="single-test" aria-selected="true">
+                            Single Image Test
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="batch-test-tab" data-bs-toggle="tab" 
+                                data-bs-target="#batch-test" type="button" role="tab" 
+                                aria-controls="batch-test" aria-selected="false">
+                            Batch Testing
+                        </button>
+                    </li>
+                </ul>
+            </div>
+            <div class="card-body">
+                <div class="tab-content" id="modelTestTabsContent">
+                    <!-- Single Image Testing Tab -->
+                    <div class="tab-pane fade show active" id="single-test" role="tabpanel" aria-labelledby="single-test-tab">
+                        <form id="single-test-form" enctype="multipart/form-data">
+                            <div class="mb-3">
+                                <label for="model-select" class="form-label">Select Model</label>
+                                <select class="form-select" id="model-select" name="model" required>
+                                    <option value="" selected disabled>Choose a model...</option>
+                                    {% for model in models %}
+                                    <option value="{{ model }}">{{ model }}</option>
+                                    {% endfor %}
+                                </select>
+                                <div class="form-text">
+                                    Choose the model you want to test your image against.
+                                </div>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="image-upload" class="form-label">Upload Image</label>
+                                <input class="form-control" type="file" id="image-upload" name="file" 
+                                       accept=".jpg,.jpeg,.png,.gif" required>
+                                <div class="form-text">
+                                    Supported formats: JPEG, PNG, GIF.
+                                </div>
+                            </div>
+                            
+                            <div class="mb-3 d-none" id="image-preview-container">
+                                <label class="form-label">Image Preview</label>
+                                <div class="text-center">
+                                    <img id="image-preview" class="img-preview img-fluid" alt="Preview">
+                                </div>
+                            </div>
+                            
+                            <div class="text-end">
+                                <button type="submit" class="btn btn-primary" id="test-button">
+                                    <i class="fas fa-vial me-2"></i>Test Image
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                    
+                    <!-- Batch Testing Tab -->
+                    <div class="tab-pane fade" id="batch-test" role="tabpanel" aria-labelledby="batch-test-tab">
+                        <form id="batch-test-form" enctype="multipart/form-data">
+                            <div class="mb-3">
+                                <label for="batch-model-select" class="form-label">Select Model</label>
+                                <select class="form-select" id="batch-model-select" name="model" required>
+                                    <option value="" selected disabled>Choose a model...</option>
+                                    {% for model in models %}
+                                    <option value="{{ model }}">{{ model }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="batch-upload" class="form-label">Upload Images</label>
+                                <input class="form-control" type="file" id="batch-upload" name="files[]" 
+                                       accept=".jpg,.jpeg,.png,.gif" multiple required>
+                                <div class="form-text">
+                                    Select multiple images for batch processing.
+                                </div>
+                            </div>
+                            
+                            <div class="mb-3 d-none" id="batch-preview-container">
+                                <label class="form-label">Selected Files</label>
+                                <div class="card">
+                                    <ul class="list-group list-group-flush" id="batch-files-list"></ul>
+                                </div>
+                            </div>
+                            
+                            <div class="text-end">
+                                <button type="submit" class="btn btn-primary" id="batch-test-button">
+                                    <i class="fas fa-tasks me-2"></i>Process Batch
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-4">
+        <!-- Results Card (initially hidden) -->
+        <div class="card d-none" id="results-card">
+            <div class="card-header">
+                <h5 class="mb-0">Results</h5>
+            </div>
+            <div class="card-body">
+                <div id="single-result-container">
+                    <div class="mb-3">
+                        <h5 class="fw-bold">Prediction</h5>
+                        <p class="h3 mb-3" id="prediction-result"></p>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <h5 class="fw-bold">Confidence Scores</h5>
+                        <div class="chart-container">
+                            <canvas id="confidence-chart"></canvas>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="batch-result-container" class="d-none">
+                    <div class="mb-3">
+                        <h5 class="fw-bold">Summary</h5>
+                        <table class="table table-sm">
+                            <tbody>
+                                <tr>
+                                    <th>Processed Images</th>
+                                    <td id="processed-count">0</td>
+                                </tr>
+                                <tr>
+                                    <th>Average Confidence</th>
+                                    <td id="avg-confidence">0%</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <h5 class="fw-bold">Class Distribution</h5>
+                        <div class="chart-container">
+                            <canvas id="distribution-chart"></canvas>
+                        </div>
+                    </div>
+                    
+                    <div class="text-center">
+                        <button class="btn btn-sm btn-outline-primary" id="view-details-btn">
+                            View Detailed Results
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Loading Overlay -->
+<div class="modal fade" id="loading-modal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-body text-center py-4">
+                <div class="spinner-border text-primary mb-3" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <h5 class="mb-0">Processing your request...</h5>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Single image preview
+    document.getElementById('image-upload').addEventListener('change', function(event) {
+        const file = event.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                document.getElementById('image-preview').src = e.target.result;
+                document.getElementById('image-preview-container').classList.remove('d-none');
+            }
+            reader.readAsDataURL(file);
+        }
+    });
+    
+    // Batch files preview
+    document.getElementById('batch-upload').addEventListener('change', function(event) {
+        const filesList = document.getElementById('batch-files-list');
+        filesList.innerHTML = '';
+        const files = event.target.files;
+        
+        if (files.length > 0) {
+            document.getElementById('batch-preview-container').classList.remove('d-none');
+            
+            for (let i = 0; i < files.length; i++) {
+                const listItem = document.createElement('li');
+                listItem.className = 'list-group-item';
+                listItem.innerHTML = `
+                    <i class="fas fa-image text-primary me-2"></i>
+                    ${files[i].name} <span class="text-muted">(${(files[i].size / 1024).toFixed(1)} KB)</span>
+                `;
+                filesList.appendChild(listItem);
+            }
+        } else {
+            document.getElementById('batch-preview-container').classList.add('d-none');
+        }
+    });
+    
+    // Single test form submission
+    document.getElementById('single-test-form').addEventListener('submit', function(event) {
+        event.preventDefault();
+        
+        const formData = new FormData(this);
+        const loadingModal = new bootstrap.Modal(document.getElementById('loading-modal'));
+        loadingModal.show();
+        
+        fetch('/test/classify', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            loadingModal.hide();
+            
+            if (data.success) {
+                // Show results
+                document.getElementById('results-card').classList.remove('d-none');
+                document.getElementById('prediction-result').textContent = data.prediction;
+                
+                // Create confidence chart
+                const confidences = data.confidences;
+                const labels = Object.keys(confidences);
+                const values = Object.values(confidences);
+                
+                const ctx = document.getElementById('confidence-chart').getContext('2d');
+                new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Confidence',
+                            data: values,
+                            backgroundColor: 'rgba(74, 111, 255, 0.7)',
+                            borderColor: 'rgba(74, 111, 255, 1)',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        indexAxis: 'y',
+                        plugins: {
+                            legend: {
+                                display: false
+                            }
+                        },
+                        scales: {
+                            x: {
+                                beginAtZero: true,
+                                max: 1
+                            }
+                        }
+                    }
+                });
+            } else {
+                alert('Error: ' + data.error);
+            }
+        })
+        .catch(error => {
+            loadingModal.hide();
+            alert('An error occurred: ' + error);
+        });
+    });
+    
+    // Batch test form submission
+    document.getElementById('batch-test-form').addEventListener('submit', function(event) {
+        event.preventDefault();
+        alert('Batch testing will be implemented in the next phase.');
+    });
+</script>
+{% endblock %} 
