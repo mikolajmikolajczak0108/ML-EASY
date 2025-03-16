@@ -1,0 +1,63 @@
+/**
+ * Main stylesheet for ML-EASY application
+ */
+
+/* Common Styles */
+body {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.footer {
+    margin-top: auto;
+}
+
+/* Card Styles */
+.card {
+    border-radius: 0.5rem;
+    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.1);
+}
+
+/* Image Gallery Styles */
+.image-gallery .card {
+    height: 100%;
+}
+
+.image-gallery .card-img-top {
+    height: 180px;
+    object-fit: cover;
+}
+
+/* Button Styles */
+.btn {
+    border-radius: 0.25rem;
+}
+
+/* Loading Styles */
+.spinner-border.larger {
+    width: 3rem;
+    height: 3rem;
+}
+
+/* Custom Classes */
+.text-truncate-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+/* Breadcrumb Styles */
+.breadcrumb {
+    background-color: transparent;
+    padding: 0.5rem 1rem;
+    margin-bottom: 1rem;
+    border-radius: 0.25rem;
+} 

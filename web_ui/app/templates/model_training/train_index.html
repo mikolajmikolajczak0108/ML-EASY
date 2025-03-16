@@ -25,7 +25,7 @@
                 </div>
                 <h5 class="card-title">Train from Scratch</h5>
                 <p class="card-text">Create a new model from scratch with your choice of architecture and dataset.</p>
-                <a href="{{ url_for('model_training.train_new_model') }}" class="btn btn-primary">
+                <a href="{{ url_for('model_training.new_model') }}" class="btn btn-primary">
                     <i class="fas fa-plus-circle me-2"></i>New Model
                 </a>
             </div>
@@ -40,7 +40,7 @@
                 </div>
                 <h5 class="card-title">Fine-tune Model</h5>
                 <p class="card-text">Take an existing model and fine-tune it for your specific use case.</p>
-                <a href="{{ url_for('model_training.finetune_model') }}" class="btn btn-primary">
+                <a href="{{ url_for('model_training.finetune') }}" class="btn btn-primary">
                     <i class="fas fa-wrench me-2"></i>Fine-tune
                 </a>
             </div>
@@ -55,7 +55,7 @@
                 </div>
                 <h5 class="card-title">Manage Datasets</h5>
                 <p class="card-text">Create, upload, and manage datasets for training your models.</p>
-                <a href="{{ url_for('model_training.list_datasets') }}" class="btn btn-primary">
+                <a href="{{ url_for('model_training.datasets') }}" class="btn btn-primary">
                     <i class="fas fa-folder-open me-2"></i>Datasets
                 </a>
             </div>

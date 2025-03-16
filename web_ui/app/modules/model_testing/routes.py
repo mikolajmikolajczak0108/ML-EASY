@@ -4,13 +4,15 @@ Routes for the model testing module.
 import os
 import cv2
 import numpy as np
+import time
 from flask import (
     Blueprint, render_template, request, jsonify, 
     current_app, redirect, url_for
 )
+from werkzeug.utils import secure_filename
 
 from app.utils.file_helpers import (
-    allowed_file, is_video_file, save_uploaded_file
+    allowed_file, is_video_file, save_uploaded_file, queue_file_upload
 )
 from app.utils.ml_helpers import (
     load_model, get_available_models
@@ -71,61 +73,65 @@ def classify_image():
             'error': 'File type not allowed'
         }), 400
     
-    # Save the uploaded file
-    file_path = save_uploaded_file(file)
+    # Generate a temporary filename and immediately return a response
+    filename = secure_filename(file.filename)
+    base, ext = os.path.splitext(filename)
+    unique_filename = f"{base}_{int(time.time() * 1000)}{ext}"
     
-    # Handle the classification
+    # Handle video files differently
     if is_video_file(file.filename):
         # Video processing will be implemented in another function
         return jsonify({
             'success': False,
             'error': 'Video processing not implemented yet'
         }), 501
-    else:
-        # Process the image
-        try:
-            # Load the model
-            model = load_model(model_name)
-            if model is None:
-                return jsonify({
-                    'success': False,
-                    'error': 'Failed to load model'
-                }), 500
-                
-            # Create a PILImage from file path
-            from fastai.vision.all import PILImage
-            img = PILImage.create(file_path)
-            
-            # Get the prediction
-            pred_class, pred_idx, outputs = model.predict(img)
-            
-            # Get confidence scores
-            confidences = {
-                model.dls.vocab[i]: float(outputs[i]) 
-                for i in range(len(outputs))
-            }
-            
-            # Sort confidences by value in descending order
-            sorted_confidences = {
-                k: v for k, v in sorted(
-                    confidences.items(), 
-                    key=lambda item: item[1], 
-                    reverse=True
-                )
-            }
-            
-            return jsonify({
-                'success': True,
-                'prediction': str(pred_class),
-                'confidences': sorted_confidences,
-                'file_path': file_path.replace('\\', '/')
-            })
-            
-        except Exception as e:
+        
+    # Use direct file saving for single image classification (no need for queue)
+    file_path = save_uploaded_file(file)
+    
+    try:
+        # Load the model
+        model = load_model(model_name)
+        if model is None:
             return jsonify({
                 'success': False,
-                'error': f'Error processing image: {str(e)}'
+                'error': 'Failed to load model'
             }), 500
+            
+        # Create a PILImage from file path
+        from fastai.vision.all import PILImage
+        img = PILImage.create(file_path)
+        
+        # Get the prediction
+        pred_class, pred_idx, outputs = model.predict(img)
+        
+        # Get confidence scores
+        confidences = {
+            model.dls.vocab[i]: float(outputs[i]) 
+            for i in range(len(outputs))
+        }
+        
+        # Sort confidences by value in descending order
+        sorted_confidences = {
+            k: v for k, v in sorted(
+                confidences.items(), 
+                key=lambda item: item[1], 
+                reverse=True
+            )
+        }
+        
+        return jsonify({
+            'success': True,
+            'prediction': str(pred_class),
+            'confidences': sorted_confidences,
+            'file_path': file_path.replace('\\', '/')
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Error processing image: {str(e)}'
+        }), 500
 
 
 @model_testing_bp.route('/batch', methods=['GET', 'POST'])
@@ -158,66 +164,78 @@ def batch_classify():
             'error': 'No files selected'
         }), 400
     
-    # Load the model
-    model = load_model(model_name)
-    if model is None:
+    # Load the model once outside the loop
+    try:
+        model = load_model(model_name)
+        if model is None:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to load model'
+            }), 500
+    except Exception as e:
         return jsonify({
             'success': False,
-            'error': 'Failed to load model'
+            'error': f'Error loading model: {str(e)}'
         }), 500
     
-    # Process each image
+    # For batch processing, we'll use a synchronous approach but process
+    # files in optimized batches
+    from fastai.vision.all import PILImage
+    
     results = []
     class_counts = {}
     total_confidence = 0
     
-    from fastai.vision.all import PILImage
-    
-    for file in files:
-        if not allowed_file(file.filename):
-            continue
+    # Process in batches to reduce memory usage
+    batch_size = 10
+    for i in range(0, len(files), batch_size):
+        batch_files = files[i:i+batch_size]
         
-        try:
-            # Save the file
-            file_path = save_uploaded_file(file)
-            
-            # Skip video files
-            if is_video_file(file.filename):
+        for file in batch_files:
+            if not allowed_file(file.filename):
                 continue
             
-            # Create a PILImage and predict
-            img = PILImage.create(file_path)
-            pred_class, pred_idx, outputs = model.predict(img)
-            
-            # Get confidence score for the prediction
-            confidence = float(outputs[pred_idx])
-            total_confidence += confidence
-            
-            # Update class counts
-            class_name = str(pred_class)
-            if class_name in class_counts:
-                class_counts[class_name] += 1
-            else:
-                class_counts[class_name] = 1
-            
-            # Get all confidence scores
-            confidences = {
-                model.dls.vocab[i]: float(outputs[i]) 
-                for i in range(len(outputs))
-            }
-            
-            # Add to results
-            results.append({
-                'filename': file.filename,
-                'prediction': class_name,
-                'confidence': confidence,
-                'confidences': confidences,
-                'file_path': file_path.replace('\\', '/')
-            })
-            
-        except Exception as e:
-            # Skip files that cause errors
-            continue
+            try:
+                # Save the file directly for immediate processing
+                file_path = save_uploaded_file(file)
+                
+                # Skip video files
+                if is_video_file(file.filename):
+                    continue
+                
+                # Create a PILImage and predict
+                img = PILImage.create(file_path)
+                pred_class, pred_idx, outputs = model.predict(img)
+                
+                # Get confidence score for the prediction
+                confidence = float(outputs[pred_idx])
+                total_confidence += confidence
+                
+                # Update class counts
+                class_name = str(pred_class)
+                if class_name in class_counts:
+                    class_counts[class_name] += 1
+                else:
+                    class_counts[class_name] = 1
+                
+                # Get all confidence scores
+                confidences = {
+                    model.dls.vocab[i]: float(outputs[i]) 
+                    for i in range(len(outputs))
+                }
+                
+                # Add to results
+                results.append({
+                    'filename': file.filename,
+                    'prediction': class_name,
+                    'confidence': confidence,
+                    'confidences': confidences,
+                    'file_path': file_path.replace('\\', '/')
+                })
+                
+            except Exception as e:
+                # Skip files that cause errors
+                continue
     
     # Calculate statistics
     num_processed = len(results)

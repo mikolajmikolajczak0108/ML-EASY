@@ -1,5 +1,4 @@
 Flask
-opencv-python
 Pillow
 torch
 torchvision
@@ -12,3 +11,4 @@ pytest-flask
 python-dotenv
 Flask-WTF
 WTForms 
+flask-sqlalchemy

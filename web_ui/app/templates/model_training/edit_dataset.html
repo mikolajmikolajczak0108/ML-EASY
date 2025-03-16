@@ -1,0 +1,721 @@
+{% extends "shared/layout.html" %}
+
+{% block title %}ML-EASY - Edit Dataset{% endblock %}
+
+{% block content %}
+<style>
+    /* Zwiększony spinner dla lepszej widoczności */
+    .spinner-border {
+        width: 3rem;
+        height: 3rem;
+    }
+    
+    /* Poprawiony styl dla wiadomości ładowania */
+    #loading-message {
+        font-size: 1.2rem;
+        margin-top: 1rem;
+    }
+    
+    /* Efekt hover dla kart w galerii zdjęć */
+    #image-gallery .card {
+        transition: transform 0.2s, box-shadow 0.2s;
+    }
+    
+    #image-gallery .card:hover {
+        transform: scale(1.03);
+        box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+    }
+    
+    /* Style dla elementów listy klas */
+    .class-item {
+        cursor: pointer;
+    }
+    
+    .class-item:hover {
+        background-color: rgba(13, 110, 253, 0.1);
+    }
+    
+    .class-item.active {
+        background-color: rgba(13, 110, 253, 0.2);
+    }
+</style>
+
+<div class="container py-4">
+    <nav style="--bs-breadcrumb-divider: '/';" aria-label="breadcrumb">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{{ url_for('home.index') }}">Home</a></li>
+            <li class="breadcrumb-item"><a href="{{ url_for('model_training.index') }}">Model Training</a></li>
+            <li class="breadcrumb-item"><a href="{{ url_for('model_training.datasets') }}">Datasets</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Edit {{ dataset_name }}</li>
+        </ol>
+    </nav>
+    
+    <h1 class="mb-4">Edit Dataset: {{ dataset_name }}</h1>
+    
+    <div class="row">
+        <!-- Classes List -->
+        <div class="col-md-3">
+            <div class="card shadow-sm">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Classes</h5>
+                </div>
+                <div class="card-body p-0">
+                    <ul class="list-group list-group-flush" id="class-list">
+                        {% for class in classes %}
+                        <li class="list-group-item d-flex justify-content-between align-items-center class-item" 
+                            data-class="{{ class.name }}" onclick="selectClass('{{ class.name }}')">
+                            {{ class.name }}
+                            <span class="badge bg-primary rounded-pill" id="count-{{ class.name }}">{{ class.count }}</span>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                <div class="card-footer">
+                    <button class="btn btn-sm btn-outline-primary w-100" data-bs-toggle="modal" data-bs-target="#newClassModal">
+                        <i class="bi bi-plus-lg"></i> Add New Class
+                    </button>
+                </div>
+            </div>
+            
+            <div class="mt-4">
+                <div class="card shadow-sm">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">Actions</h5>
+                    </div>
+                    <div class="card-body">
+                        <button id="upload-btn" class="btn btn-outline-primary w-100 mb-2" disabled data-bs-toggle="modal" data-bs-target="#uploadModal">
+                            <i class="bi bi-upload"></i> Upload Images
+                        </button>
+                        <button id="delete-class-btn" class="btn btn-outline-danger w-100 mb-2" disabled data-bs-toggle="modal" data-bs-target="#deleteClassModal">
+                            <i class="bi bi-trash"></i> Delete Class
+                        </button>
+                        <a href="{{ url_for('model_training.datasets') }}" class="btn btn-outline-secondary w-100">
+                            <i class="bi bi-arrow-left"></i> Back to Datasets
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Class Content -->
+        <div class="col-md-9">
+            <div class="card shadow-sm">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="card-title mb-0" id="current-class-title">Select a class</h5>
+                    <button id="refresh-btn" class="btn btn-sm btn-outline-secondary" onclick="refreshCurrentClass()" disabled>
+                        <i class="bi bi-arrow-clockwise"></i> Refresh
+                    </button>
+                </div>
+                <div class="card-body" id="class-content-container">
+                    <!-- Initial state - No class selected -->
+                    <div id="no-class-selected">
+                        <div class="text-center py-5">
+                            <i class="bi bi-folder2-open" style="font-size: 3rem;"></i>
+                            <h4 class="mt-3">No Class Selected</h4>
+                            <p class="text-muted">Select a class from the list to view and manage its images.</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Class content when a class is selected -->
+                    <div id="class-content" class="d-none">
+                        <!-- No images state -->
+                        <div id="no-images" class="text-center py-5">
+                            <i class="bi bi-image" style="font-size: 3rem;"></i>
+                            <h4 class="mt-3">No Images Found</h4>
+                            <p class="text-muted">This class doesn't have any images yet. Upload some images to get started.</p>
+                            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#uploadModal">
+                                <i class="bi bi-upload"></i> Upload Images
+                            </button>
+                        </div>
+                        
+                        <!-- Image gallery -->
+                        <div id="image-gallery" class="row row-cols-1 row-cols-md-3 g-4">
+                            <!-- Images will be loaded here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- New Class Modal -->
+<div class="modal fade" id="newClassModal" tabindex="-1" aria-labelledby="newClassModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="newClassModalLabel">Add New Class</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="new-class-form">
+                    <div class="mb-3">
+                        <label for="class-name" class="form-label">Class Name</label>
+                        <input type="text" class="form-control" id="class-name" required>
+                        <div class="form-text">Use a simple, descriptive name like "dogs", "cats", or "cars".</div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="add-class-btn">Add Class</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Class Modal -->
+<div class="modal fade" id="deleteClassModal" tabindex="-1" aria-labelledby="deleteClassModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="deleteClassModalLabel">Delete Class</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to delete the class "<span id="delete-class-name"></span>"?</p>
+                <p class="text-danger"><strong>Warning:</strong> This will delete all images in this class. This action cannot be undone.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-danger" id="confirm-delete-btn">Delete</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Upload Modal -->
+<div class="modal fade" id="uploadModal" tabindex="-1" aria-labelledby="uploadModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="uploadModalLabel">Upload Images</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="upload-form">
+                    <div class="mb-3">
+                        <label for="image-upload" class="form-label">Select Images</label>
+                        <input class="form-control" type="file" id="image-upload" accept=".jpg,.jpeg,.png,.gif" multiple>
+                        <div class="form-text">Supported formats: JPG, JPEG, PNG, GIF</div>
+                    </div>
+                    
+                    <div id="selected-files-container" class="d-none">
+                        <label class="form-label">Selected Files</label>
+                        <div class="card">
+                            <ul class="list-group list-group-flush" id="selected-files-list">
+                            </ul>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="upload-submit-btn">Upload</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Loading Modal -->
+<div class="modal fade" id="loadingModal" tabindex="-1" data-bs-backdrop="static" aria-labelledby="loadingModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-body text-center py-4">
+                <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;"></div>
+                <p id="loading-message" class="mt-3 mb-0" style="font-size: 1.2rem;">Processing your request...</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Success Toast -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index: 11">
+    <div id="successToast" class="toast bg-success text-white" role="alert" aria-live="assertive" aria-atomic="true">
+        <div class="d-flex">
+            <div class="toast-body">
+                Files uploaded successfully!
+            </div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+        </div>
+    </div>
+</div>
+
+<!-- Error Toast -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index: 11">
+    <div id="errorToast" class="toast bg-danger text-white" role="alert" aria-live="assertive" aria-atomic="true">
+        <div class="d-flex">
+            <div class="toast-body" id="errorToastBody">
+                Error uploading files!
+            </div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+        </div>
+    </div>
+</div>
+
+<!-- Debug Modal -->
+<div class="modal fade" id="debugModal" tabindex="-1" aria-labelledby="debugModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="debugModalLabel">Debug Information</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <h6>Current Class:</h6>
+                    <pre id="debug-current-class" class="bg-light p-2">None</pre>
+                </div>
+                <div class="mb-3">
+                    <h6>Last Upload Result:</h6>
+                    <pre id="debug-last-result" class="bg-light p-2">No uploads yet</pre>
+                </div>
+                <div>
+                    <h6>Last Error:</h6>
+                    <pre id="debug-last-error" class="bg-light p-2">No errors yet</pre>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Include the optimized uploader -->
+<script src="{{ url_for('static', filename='js/upload_optimizer.js') }}"></script>
+
+<!-- Make sure Bootstrap JS is loaded properly -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-ka7Sk0Gln4gmtz2MlQnikT1wXgYsOg+OMhuP+IlRH9sENBO0LRn5q+8nbTov4+1p" crossorigin="anonymous"></script>
+
+<script>
+    // Initialize variables
+    let currentClass = null;
+    let lastResult = null;
+    let lastError = null;
+    let loadingModalInstance = null;
+    
+    // Function to completely remove the loading modal - outside DOM ready to make it global
+    function closeLoadingModalCompletely() {
+        try {
+            // Try to use Bootstrap API to hide the modal
+            if (loadingModalInstance) {
+                loadingModalInstance.hide();
+            } else {
+                // Fallback if the instance isn't available
+                const modalElement = document.getElementById('loadingModal');
+                if (modalElement) {
+                    const bsModal = bootstrap.Modal.getInstance(modalElement);
+                    if (bsModal) bsModal.hide();
+                }
+            }
+            
+            // Force remove all modal backdrops
+            setTimeout(() => {
+                // Remove backdrop elements
+                document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
+                
+                // Force remove modal-open class and inline styles from body
+                document.body.classList.remove('modal-open');
+                document.body.style.overflow = '';
+                document.body.style.paddingRight = '';
+                
+                // Force hide the modal element itself
+                const modalElement = document.getElementById('loadingModal');
+                if (modalElement) {
+                    modalElement.classList.remove('show');
+                    modalElement.style.display = 'none';
+                    modalElement.setAttribute('aria-hidden', 'true');
+                    modalElement.removeAttribute('aria-modal');
+                }
+            }, 100);
+        } catch (e) {
+            console.error('Error closing modal:', e);
+            // Last resort fallback
+            const modalElement = document.getElementById('loadingModal');
+            if (modalElement) {
+                modalElement.classList.remove('show');
+                modalElement.style.display = 'none';
+            }
+            document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
+            document.body.classList.remove('modal-open');
+            document.body.style.overflow = '';
+        }
+    }
+    
+    // Wait for document ready to initialize Bootstrap components
+    document.addEventListener('DOMContentLoaded', function() {
+        // Initialize Bootstrap components
+        const uploadModal = new bootstrap.Modal(document.getElementById('uploadModal'));
+        loadingModalInstance = new bootstrap.Modal(document.getElementById('loadingModal'));
+        const successToast = new bootstrap.Toast(document.getElementById('successToast'));
+        const errorToast = new bootstrap.Toast(document.getElementById('errorToast'));
+        const debugModal = new bootstrap.Modal(document.getElementById('debugModal'));
+        
+        // Update debug information
+        function updateDebugInfo() {
+            document.getElementById('debug-current-class').textContent = currentClass || 'None';
+            document.getElementById('debug-last-result').textContent = lastResult ? JSON.stringify(lastResult, null, 2) : 'No uploads yet';
+            document.getElementById('debug-last-error').textContent = lastError ? JSON.stringify(lastError, null, 2) : 'No errors yet';
+        }
+        
+        // Add debug button to actions
+        document.querySelector('.card-body').insertAdjacentHTML('beforeend', `
+            <button id="debug-btn" class="btn btn-outline-info w-100 mt-2" type="button" data-bs-toggle="modal" data-bs-target="#debugModal">
+                <i class="bi bi-bug"></i> Debug Info
+            </button>
+        `);
+        
+        // Add event listener for debug button
+        document.getElementById('debug-btn').addEventListener('click', updateDebugInfo);
+        
+        // Create an instance of the optimized uploader
+        const uploader = new OptimizedUploader({
+            maxFilesPerBatch: 5,
+            timeout: 30000,
+            onProgress: (progress) => {
+                document.getElementById('loading-message').textContent = 
+                    `Uploading batch ${progress.currentBatch} of ${progress.totalBatches} (${progress.startIdx}-${progress.endIdx} of ${progress.totalFiles})...`;
+            },
+            onComplete: (result) => {
+                lastResult = result;
+                
+                // Add a slight delay before closing modal to ensure it's processed properly
+                setTimeout(() => {
+                    closeLoadingModalCompletely();
+                    
+                    if (result.success) {
+                        // Show toast instead of alert
+                        successToast.show();
+                        
+                        // Reset form
+                        document.getElementById('upload-form').reset();
+                        document.getElementById('selected-files-container').classList.add('d-none');
+                        
+                        // Refresh the current class view after a short delay
+                        setTimeout(() => {
+                            updateClassCounts();
+                            if (currentClass) {
+                                selectClass(currentClass);
+                            }
+                        }, 500);
+                    } else {
+                        document.getElementById('errorToastBody').textContent = 'Upload failed: ' + (result.error || 'Unknown error');
+                        errorToast.show();
+                    }
+                }, 200);
+            },
+            onError: (error) => {
+                lastError = error;
+                
+                setTimeout(() => {
+                    closeLoadingModalCompletely();
+                    
+                    console.error('Upload error:', error);
+                    document.getElementById('errorToastBody').textContent = 'Error: ' + (error.message || 'Unknown upload error');
+                    errorToast.show();
+                }, 200);
+            }
+        });
+        
+        // Function to handle upload submission using optimized uploader
+        document.getElementById('upload-submit-btn').addEventListener('click', function() {
+            const fileInput = document.getElementById('image-upload');
+            
+            if (fileInput.files.length === 0) {
+                alert('Please select at least one file to upload.');
+                return;
+            }
+            
+            if (!currentClass) {
+                alert('Please select a class first.');
+                uploadModal.hide();
+                return;
+            }
+            
+            // Properly close the upload modal first to avoid aria-hidden issues
+            uploadModal.hide();
+            
+            try {
+                // Show loading modal after a brief delay to ensure upload modal is fully closed
+                setTimeout(() => {
+                    document.getElementById('loading-message').textContent = `Preparing to upload ${fileInput.files.length} images...`;
+                    loadingModalInstance.show();
+                    
+                    console.log(`Uploading ${fileInput.files.length} files to class ${currentClass}`);
+                    
+                    // Use the optimized uploader
+                    const uploadEndpoint = `/train/datasets/{{ dataset_name }}/upload/${currentClass}`;
+                    console.log('Upload endpoint:', uploadEndpoint);
+                    
+                    uploader.addToQueue(
+                        fileInput.files, 
+                        uploadEndpoint
+                    );
+                }, 300);
+            } catch (e) {
+                console.error('Error starting upload:', e);
+                alert('Error starting upload: ' + e.message);
+            }
+        });
+    
+        // Handle Add Class button
+        document.getElementById('add-class-btn').addEventListener('click', function() {
+            const className = document.getElementById('class-name').value.trim();
+            
+            if (!className) {
+                alert('Please enter a class name.');
+                return;
+            }
+            
+            const newClassModal = bootstrap.Modal.getInstance(document.getElementById('newClassModal'));
+            newClassModal.hide();
+            
+            loadingModalInstance.show();
+            
+            // Endpoint and data format
+            fetch(`/train/datasets/{{ dataset_name }}/classes/new`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: `class_name=${encodeURIComponent(className)}`
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                loadingModalInstance.hide();
+                
+                if (data.success) {
+                    // Add the new class to the list
+                    const classList = document.getElementById('class-list');
+                    const li = document.createElement('li');
+                    li.className = 'list-group-item d-flex justify-content-between align-items-center class-item';
+                    li.setAttribute('data-class', className);
+                    li.setAttribute('onclick', `selectClass('${className}')`);
+                    li.innerHTML = `${className} <span class="badge bg-primary rounded-pill" id="count-${className}">0</span>`;
+                    classList.appendChild(li);
+                    
+                    // Clear the form
+                    document.getElementById('class-name').value = '';
+                    
+                    // Select the new class
+                    selectClass(className);
+                } else {
+                    alert('Error: ' + (data.error || 'Unknown error occurred'));
+                }
+            })
+            .catch(error => {
+                loadingModalInstance.hide();
+                console.error('Error:', error);
+                alert('Failed to create class: ' + error.message);
+            });
+        });
+        
+        // Handle Delete Class button
+        document.getElementById('confirm-delete-btn').addEventListener('click', function() {
+            const deleteClassModal = bootstrap.Modal.getInstance(document.getElementById('deleteClassModal'));
+            deleteClassModal.hide();
+            
+            loadingModalInstance.show();
+            
+            fetch(`/train/datasets/{{ dataset_name }}/class/${currentClass}/delete`, {
+                method: 'POST'
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                loadingModalInstance.hide();
+                
+                if (data.success) {
+                    // Remove the class from the list
+                    const classItem = document.querySelector(`.class-item[data-class="${currentClass}"]`);
+                    if (classItem) {
+                        classItem.remove();
+                    }
+                    
+                    // Reset the current class
+                    currentClass = null;
+                    document.getElementById('current-class-title').textContent = 'Select a class';
+                    document.getElementById('upload-btn').disabled = true;
+                    document.getElementById('delete-class-btn').disabled = true;
+                    document.getElementById('refresh-btn').disabled = true;
+                    document.getElementById('no-class-selected').classList.remove('d-none');
+                    document.getElementById('class-content').classList.add('d-none');
+                    
+                    // Update class counts
+                    updateClassCounts();
+                } else {
+                    alert('Error: ' + (data.error || 'Unknown error occurred'));
+                }
+            })
+            .catch(error => {
+                loadingModalInstance.hide();
+                console.error('Error:', error);
+                alert('Failed to delete class: ' + error.message);
+            });
+        });
+        
+        // Call updateClassCounts at page load to initialize counts
+        updateClassCounts();
+        
+        // Handle file selection for uploads
+        document.getElementById('image-upload').addEventListener('change', function() {
+            const files = this.files;
+            const fileList = document.getElementById('selected-files-list');
+            const container = document.getElementById('selected-files-container');
+            
+            if (files.length > 0) {
+                container.classList.remove('d-none');
+                fileList.innerHTML = '';
+                
+                for (let i = 0; i < Math.min(files.length, 5); i++) {
+                    const file = files[i];
+                    const item = document.createElement('li');
+                    item.className = 'list-group-item d-flex justify-content-between align-items-center';
+                    
+                    const name = document.createElement('span');
+                    name.textContent = file.name;
+                    
+                    const size = document.createElement('span');
+                    size.className = 'badge bg-secondary';
+                    size.textContent = formatFileSize(file.size);
+                    
+                    item.appendChild(name);
+                    item.appendChild(size);
+                    fileList.appendChild(item);
+                }
+                
+                if (files.length > 5) {
+                    const item = document.createElement('li');
+                    item.className = 'list-group-item text-center';
+                    item.textContent = `... and ${files.length - 5} more files`;
+                    fileList.appendChild(item);
+                }
+            } else {
+                container.classList.add('d-none');
+            }
+        });
+    });
+    
+    // Function to update class counts - Needs to be outside DOMContentLoaded since it's called from selectClass
+    function updateClassCounts() {
+        fetch(`/train/datasets/{{ dataset_name }}/stats`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.success && data.class_counts) {
+                    // Update each class count in the UI
+                    Object.keys(data.class_counts).forEach(className => {
+                        const countElement = document.getElementById(`count-${className}`);
+                        if (countElement) {
+                            countElement.textContent = data.class_counts[className];
+                        }
+                    });
+                }
+            })
+            .catch(error => console.error('Error fetching class counts:', error));
+    }
+    
+    // Function to refresh the current class - Needs to be outside DOMContentLoaded since it's called by button
+    function refreshCurrentClass() {
+        if (currentClass) {
+            selectClass(currentClass);
+        }
+    }
+    
+    // Function to select a class and display its images - Needs to be outside DOMContentLoaded since it's called by onclick
+    function selectClass(className) {
+        currentClass = className;
+        
+        // Update UI
+        document.getElementById('current-class-title').textContent = className;
+        document.getElementById('upload-btn').disabled = false;
+        document.getElementById('delete-class-btn').disabled = false;
+        document.getElementById('refresh-btn').disabled = false;
+        document.getElementById('delete-class-name').textContent = className;
+        document.getElementById('no-class-selected').classList.add('d-none');
+        document.getElementById('class-content').classList.remove('d-none');
+        
+        // Update active class in list
+        document.querySelectorAll('.class-item').forEach(item => {
+            item.classList.remove('active');
+        });
+        
+        const activeClassItem = document.querySelector(`.class-item[data-class="${className}"]`);
+        if (activeClassItem) {
+            activeClassItem.classList.add('active');
+        }
+        
+        // Start with loading state
+        document.getElementById('no-images').classList.add('d-none');
+        document.getElementById('image-gallery').innerHTML = '<div class="col-12 text-center py-3"><div class="spinner-border" role="status"></div><p class="mt-2">Loading images...</p></div>';
+        
+        // Fetch images for this class to properly display them
+        fetch(`/train/datasets/{{ dataset_name }}/class/${className}/images`)
+            .then(response => {
+                // If endpoint doesn't exist, just continue without error
+                if (!response.ok && response.status !== 404) {
+                    throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.success && data.images && data.images.length > 0) {
+                    // Display the images
+                    document.getElementById('no-images').classList.add('d-none');
+                    const gallery = document.getElementById('image-gallery');
+                    gallery.innerHTML = '';
+                    
+                    data.images.forEach(image => {
+                        const col = document.createElement('div');
+                        col.className = 'col';
+                        col.innerHTML = `
+                            <div class="card h-100">
+                                <img src="${image.url}" class="card-img-top" alt="${image.filename}">
+                                <div class="card-body p-2">
+                                    <p class="card-text small text-truncate">${image.filename}</p>
+                                </div>
+                            </div>
+                        `;
+                        gallery.appendChild(col);
+                    });
+                    
+                    // Update the class count
+                    const countElement = document.getElementById(`count-${className}`);
+                    if (countElement) {
+                        countElement.textContent = data.images.length;
+                    }
+                } else {
+                    // No images found
+                    document.getElementById('no-images').classList.remove('d-none');
+                    document.getElementById('image-gallery').innerHTML = '';
+                }
+            })
+            .catch(error => {
+                console.log('Error fetching images:', error);
+                // If error, show empty state
+                document.getElementById('no-images').classList.remove('d-none');
+                document.getElementById('image-gallery').innerHTML = '';
+            });
+    }
+    
+    // Helper function to format file size
+    function formatFileSize(bytes) {
+        if (bytes < 1024) {
+            return bytes + ' B';
+        } else if (bytes < 1024 * 1024) {
+            return (bytes / 1024).toFixed(1) + ' KB';
+        } else {
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+    }
+</script>
+{% endblock %}

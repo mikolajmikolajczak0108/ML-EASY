@@ -41,7 +41,9 @@ class TestConfig(unittest.TestCase):
         
         # Test that SECRET_KEY is set from environment variable
         os.environ['SECRET_KEY'] = 'test_secret_key'
-        self.assertEqual(ProductionConfig.SECRET_KEY, 'test_secret_key')
+        # Create a new instance of ProductionConfig to use the new environment variable
+        test_config = ProductionConfig()
+        self.assertEqual(test_config.SECRET_KEY, 'test_secret_key')
         
         # Clean up
         del os.environ['SECRET_KEY']

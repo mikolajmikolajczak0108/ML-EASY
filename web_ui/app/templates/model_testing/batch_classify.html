@@ -1,0 +1,321 @@
+{% extends "shared/layout.html" %}
+
+{% block title %}ML-EASY - Batch Testing{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="/">Home</a></li>
+                <li class="breadcrumb-item"><a href="{{ url_for('model_testing.index') }}">Test Models</a></li>
+                <li class="breadcrumb-item active">Batch Testing</li>
+            </ol>
+        </nav>
+        <h1 class="mb-3">Batch Image Testing</h1>
+        <p class="lead">Upload multiple images to test against trained models and see classification results for all images.</p>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-lg-8">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">Upload Images</h5>
+            </div>
+            <div class="card-body">
+                <form id="batch-test-form" enctype="multipart/form-data">
+                    <div class="mb-3">
+                        <label for="model-select" class="form-label">Select Model</label>
+                        <select class="form-select" id="model-select" name="model" required>
+                            <option value="" selected disabled>Choose a model...</option>
+                            {% for model in models %}
+                            <option value="{{ model }}">{{ model }}</option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-text">
+                            Choose the model you want to test your images against.
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="images-upload" class="form-label">Upload Images</label>
+                        <input class="form-control" type="file" id="images-upload" name="files[]" 
+                               accept=".jpg,.jpeg,.png,.gif" multiple required>
+                        <div class="form-text">
+                            Select multiple images for batch processing. Supported formats: JPEG, PNG, GIF.
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3 d-none" id="file-list-container">
+                        <label class="form-label">Selected Files</label>
+                        <div class="card">
+                            <ul class="list-group list-group-flush" id="file-list"></ul>
+                        </div>
+                    </div>
+                    
+                    <div class="text-end">
+                        <button type="submit" class="btn btn-primary" id="process-button">
+                            <i class="fas fa-tasks me-2"></i>Process Batch
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Tips</h5>
+            </div>
+            <div class="card-body">
+                <p><i class="fas fa-info-circle text-info me-2"></i> You can select multiple images at once by holding Ctrl (or Command on Mac) while clicking.</p>
+                <p><i class="fas fa-info-circle text-info me-2"></i> Maximum file size for each image is 16MB.</p>
+                <p><i class="fas fa-info-circle text-info me-2"></i> Processing time depends on the number of images and their sizes.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Results section (initially hidden) -->
+<div class="row mt-4 d-none" id="results-section">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Batch Results</h5>
+                <button class="btn btn-sm btn-outline-secondary" id="export-results-btn">
+                    <i class="fas fa-download me-2"></i>Export Results
+                </button>
+            </div>
+            <div class="card-body">
+                <!-- Summary -->
+                <div class="row mb-4">
+                    <div class="col-md-4">
+                        <div class="card bg-light">
+                            <div class="card-body text-center">
+                                <h6 class="text-muted">Processed Images</h6>
+                                <h2 id="processed-count">0</h2>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card bg-light">
+                            <div class="card-body text-center">
+                                <h6 class="text-muted">Average Confidence</h6>
+                                <h2 id="avg-confidence">0%</h2>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card bg-light">
+                            <div class="card-body text-center">
+                                <h6 class="text-muted">Classes Found</h6>
+                                <h2 id="classes-count">0</h2>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Charts -->
+                <div class="row mb-4">
+                    <div class="col-md-6">
+                        <h5 class="mb-3">Class Distribution</h5>
+                        <div class="chart-container">
+                            <canvas id="class-distribution-chart"></canvas>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <h5 class="mb-3">Confidence Distribution</h5>
+                        <div class="chart-container">
+                            <canvas id="confidence-distribution-chart"></canvas>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Detailed Results Table -->
+                <h5 class="mb-3">Detailed Results</h5>
+                <div class="table-responsive">
+                    <table class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th>Image</th>
+                                <th>Filename</th>
+                                <th>Prediction</th>
+                                <th>Confidence</th>
+                            </tr>
+                        </thead>
+                        <tbody id="results-table-body">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Loading Modal -->
+<div class="modal fade" id="loading-modal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-body text-center py-4">
+                <div class="spinner-border text-primary mb-3" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <h5 class="mb-0">Processing your images...</h5>
+                <p class="text-muted" id="processing-status">This may take a moment</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Display selected files
+    document.getElementById('images-upload').addEventListener('change', function(event) {
+        const files = event.target.files;
+        const fileList = document.getElementById('file-list');
+        fileList.innerHTML = '';
+        
+        if (files.length > 0) {
+            document.getElementById('file-list-container').classList.remove('d-none');
+            
+            for (let i = 0; i < files.length; i++) {
+                const listItem = document.createElement('li');
+                listItem.className = 'list-group-item';
+                listItem.innerHTML = `
+                    <i class="fas fa-image text-primary me-2"></i>
+                    ${files[i].name} <span class="text-muted">(${(files[i].size / 1024).toFixed(1)} KB)</span>
+                `;
+                fileList.appendChild(listItem);
+            }
+        } else {
+            document.getElementById('file-list-container').classList.add('d-none');
+        }
+    });
+    
+    // Handle form submission
+    document.getElementById('batch-test-form').addEventListener('submit', function(event) {
+        event.preventDefault();
+        
+        const formData = new FormData(this);
+        const loadingModal = new bootstrap.Modal(document.getElementById('loading-modal'));
+        loadingModal.show();
+        
+        fetch('/test/batch', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            loadingModal.hide();
+            
+            if (data.success) {
+                displayResults(data);
+            } else {
+                alert('Error: ' + data.error);
+            }
+        })
+        .catch(error => {
+            loadingModal.hide();
+            alert('An error occurred: ' + error);
+        });
+    });
+    
+    // Display results
+    function displayResults(data) {
+        // Show results section
+        document.getElementById('results-section').classList.remove('d-none');
+        
+        // Update summary stats
+        document.getElementById('processed-count').textContent = data.stats.processed_count;
+        document.getElementById('avg-confidence').textContent = (data.stats.average_confidence * 100).toFixed(1) + '%';
+        document.getElementById('classes-count').textContent = Object.keys(data.stats.class_distribution).length;
+        
+        // Clear table
+        const tableBody = document.getElementById('results-table-body');
+        tableBody.innerHTML = '';
+        
+        // Add rows to table
+        data.results.forEach(result => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td><img src="${result.file_path}" alt="${result.filename}" class="img-thumbnail" width="50"></td>
+                <td>${result.filename}</td>
+                <td>${result.prediction}</td>
+                <td>${(result.confidence * 100).toFixed(1)}%</td>
+            `;
+            tableBody.appendChild(row);
+        });
+        
+        // Create class distribution chart
+        const classLabels = Object.keys(data.stats.class_distribution);
+        const classValues = Object.values(data.stats.class_distribution);
+        
+        new Chart(document.getElementById('class-distribution-chart').getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: classLabels,
+                datasets: [{
+                    label: 'Number of Images',
+                    data: classValues,
+                    backgroundColor: 'rgba(74, 111, 255, 0.7)',
+                    borderColor: 'rgba(74, 111, 255, 1)',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            precision: 0
+                        }
+                    }
+                }
+            }
+        });
+        
+        // Create confidence distribution chart
+        const confidenceBins = ['0-25%', '26-50%', '51-75%', '76-100%'];
+        const confidenceCounts = [0, 0, 0, 0];
+        
+        data.results.forEach(result => {
+            const confidence = result.confidence * 100;
+            if (confidence <= 25) confidenceCounts[0]++;
+            else if (confidence <= 50) confidenceCounts[1]++;
+            else if (confidence <= 75) confidenceCounts[2]++;
+            else confidenceCounts[3]++;
+        });
+        
+        new Chart(document.getElementById('confidence-distribution-chart').getContext('2d'), {
+            type: 'pie',
+            data: {
+                labels: confidenceBins,
+                datasets: [{
+                    data: confidenceCounts,
+                    backgroundColor: [
+                        'rgba(220, 53, 69, 0.7)',
+                        'rgba(255, 193, 7, 0.7)',
+                        'rgba(23, 162, 184, 0.7)',
+                        'rgba(40, 167, 69, 0.7)'
+                    ],
+                    borderColor: [
+                        'rgba(220, 53, 69, 1)',
+                        'rgba(255, 193, 7, 1)',
+                        'rgba(23, 162, 184, 1)',
+                        'rgba(40, 167, 69, 1)'
+                    ],
+                    borderWidth: 1
+                }]
+            }
+        });
+    }
+    
+    // Export results
+    document.getElementById('export-results-btn').addEventListener('click', function() {
+        alert('Export functionality will be implemented in the next phase.');
+    });
+</script>
+{% endblock %} 

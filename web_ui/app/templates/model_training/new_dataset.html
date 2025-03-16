@@ -1,0 +1,164 @@
+{% extends "shared/layout.html" %}
+
+{% block title %}ML-EASY - Create New Dataset{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{{ url_for('home.index') }}">Home</a></li>
+            <li class="breadcrumb-item"><a href="{{ url_for('model_training.index') }}">Model Training</a></li>
+            <li class="breadcrumb-item"><a href="{{ url_for('model_training.datasets') }}">Datasets</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Create New Dataset</li>
+        </ol>
+    </nav>
+
+    <div class="card shadow">
+        <div class="card-header bg-primary text-white">
+            <h4 class="mb-0">Create New Dataset</h4>
+        </div>
+        <div class="card-body">
+            <form id="createDatasetForm">
+                <div class="mb-3">
+                    <label for="datasetName" class="form-label">Dataset Name</label>
+                    <input type="text" class="form-control" id="datasetName" name="dataset_name" required>
+                    <div class="form-text">Give your dataset a descriptive name (no spaces or special characters)</div>
+                </div>
+
+                <div class="mb-3">
+                    <label for="numClasses" class="form-label">Number of Classes</label>
+                    <input type="number" class="form-control" id="numClasses" name="num_classes" min="2" value="2" required>
+                    <div class="form-text">How many different categories will your dataset contain?</div>
+                </div>
+
+                <div id="classNamesContainer">
+                    <label class="form-label">Class Names</label>
+                    <div class="mb-3">
+                        <input type="text" class="form-control mb-2" name="class_names[]" placeholder="Class 1 (e.g. 'cats')" required>
+                        <input type="text" class="form-control" name="class_names[]" placeholder="Class 2 (e.g. 'dogs')" required>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <button type="button" id="addClassBtn" class="btn btn-outline-secondary btn-sm">
+                        <i class="fas fa-plus me-2"></i>Add Another Class
+                    </button>
+                </div>
+
+                <div class="d-flex justify-content-between">
+                    <a href="{{ url_for('model_training.datasets') }}" class="btn btn-outline-secondary">Cancel</a>
+                    <button type="submit" class="btn btn-primary">Create Dataset</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Loading Modal -->
+<div class="modal fade" id="loadingModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-body text-center py-4">
+                <div class="spinner-border text-primary mb-3" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <h5 class="mb-0">Creating dataset...</h5>
+                <p class="text-muted">This may take a moment</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const numClassesInput = document.getElementById('numClasses');
+        const classNamesContainer = document.getElementById('classNamesContainer');
+        const addClassBtn = document.getElementById('addClassBtn');
+        const form = document.getElementById('createDatasetForm');
+        
+        // Update class name fields when number of classes changes
+        numClassesInput.addEventListener('change', function() {
+            updateClassNameFields();
+        });
+        
+        // Add another class name field
+        addClassBtn.addEventListener('click', function() {
+            const currentCount = document.querySelectorAll('[name="class_names[]"]').length;
+            numClassesInput.value = currentCount + 1;
+            updateClassNameFields();
+        });
+        
+        // Function to update class name fields based on number of classes
+        function updateClassNameFields() {
+            const numClasses = parseInt(numClassesInput.value);
+            const currentFields = document.querySelectorAll('[name="class_names[]"]');
+            const currentCount = currentFields.length;
+            
+            // Create a div to hold all inputs
+            let fieldsDiv = document.createElement('div');
+            fieldsDiv.className = 'mb-3';
+            
+            // Keep existing values
+            const existingValues = [];
+            currentFields.forEach(field => {
+                existingValues.push(field.value);
+            });
+            
+            // Create the required number of input fields
+            for (let i = 0; i < numClasses; i++) {
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.className = 'form-control mb-2';
+                input.name = 'class_names[]';
+                input.placeholder = `Class ${i+1}`;
+                input.required = true;
+                
+                // Set value if it exists
+                if (i < existingValues.length) {
+                    input.value = existingValues[i];
+                }
+                
+                fieldsDiv.appendChild(input);
+            }
+            
+            // Replace existing fields
+            const existingDiv = classNamesContainer.querySelector('div');
+            classNamesContainer.replaceChild(fieldsDiv, existingDiv);
+        }
+        
+        // Handle form submission
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            // Show loading modal
+            const loadingModal = new bootstrap.Modal(document.getElementById('loadingModal'));
+            loadingModal.show();
+            
+            // Submit form data
+            const formData = new FormData(form);
+            
+            fetch('{{ url_for("model_training.create_dataset") }}', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                loadingModal.hide();
+                
+                if (data.success) {
+                    // Redirect to edit dataset page
+                    window.location.href = data.redirect;
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            })
+            .catch(error => {
+                loadingModal.hide();
+                alert('An error occurred: ' + error);
+            });
+        });
+    });
+</script>
+{% endblock %} 

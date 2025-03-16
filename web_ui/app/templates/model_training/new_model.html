@@ -1,0 +1,142 @@
+{% extends "shared/layout.html" %}
+
+{% block title %}Train New Model{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{{ url_for('home.index') }}">Home</a></li>
+            <li class="breadcrumb-item"><a href="{{ url_for('model_training.index') }}">Model Training</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Train New Model</li>
+        </ol>
+    </nav>
+
+    <div class="card shadow">
+        <div class="card-header bg-primary text-white">
+            <h4 class="mb-0">Train New Model</h4>
+        </div>
+        <div class="card-body">
+            <form id="trainModelForm">
+                <div class="mb-3">
+                    <label for="modelName" class="form-label">Model Name</label>
+                    <input type="text" class="form-control" id="modelName" name="model_name" required>
+                    <div class="form-text">Give your model a descriptive name</div>
+                </div>
+
+                <div class="mb-3">
+                    <label for="dataset" class="form-label">Select Dataset</label>
+                    <select class="form-select" id="dataset" name="dataset" required>
+                        <option value="" selected disabled>Choose a dataset</option>
+                        {% for dataset in datasets %}
+                        <option value="{{ dataset }}">{{ dataset }}</option>
+                        {% endfor %}
+                    </select>
+                    <div class="form-text">
+                        Don't see your dataset? <a href="{{ url_for('model_training.create_dataset') }}">Create a new dataset</a>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <label for="architecture" class="form-label">Select Model Architecture</label>
+                    <select class="form-select" id="architecture" name="architecture" required>
+                        <option value="" selected disabled>Choose an architecture</option>
+                        {% for arch in architectures %}
+                        <option value="{{ arch }}">{{ arch }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label for="epochs" class="form-label">Number of Epochs</label>
+                        <input type="number" class="form-control" id="epochs" name="epochs" min="1" value="10" required>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="batchSize" class="form-label">Batch Size</label>
+                        <input type="number" class="form-control" id="batchSize" name="batch_size" min="1" value="16" required>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <label for="learningRate" class="form-label">Learning Rate</label>
+                    <input type="number" class="form-control" id="learningRate" name="learning_rate" min="0.0001" step="0.0001" value="0.001" required>
+                </div>
+
+                <div class="mb-3 form-check">
+                    <input type="checkbox" class="form-check-input" id="useAugmentation" name="use_augmentation" checked>
+                    <label class="form-check-label" for="useAugmentation">Use Data Augmentation</label>
+                </div>
+
+                <div id="trainingProgress" class="d-none">
+                    <div class="mb-3">
+                        <label class="form-label">Training Progress</label>
+                        <div class="progress" style="height: 20px;">
+                            <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" style="width: 0%">0%</div>
+                        </div>
+                    </div>
+                    <div id="trainingStatus" class="alert alert-info">Preparing training environment...</div>
+                </div>
+
+                <div class="d-flex justify-content-between">
+                    <a href="{{ url_for('model_training.index') }}" class="btn btn-outline-secondary">Cancel</a>
+                    <button type="submit" class="btn btn-primary" id="submitBtn">Start Training</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const form = document.getElementById('trainModelForm');
+        const progressSection = document.getElementById('trainingProgress');
+        const progressBar = document.getElementById('progressBar');
+        const trainingStatus = document.getElementById('trainingStatus');
+        const submitBtn = document.getElementById('submitBtn');
+
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            // Show progress section
+            progressSection.classList.remove('d-none');
+            submitBtn.disabled = true;
+            
+            // Collect form data
+            const formData = new FormData(form);
+            
+            // This would be replaced with actual backend communication
+            // For now, we'll just simulate progress
+            let progress = 0;
+            const interval = setInterval(function() {
+                progress += 5;
+                if (progress > 100) {
+                    clearInterval(interval);
+                    trainingStatus.textContent = 'Training not yet implemented.';
+                    trainingStatus.classList.remove('alert-info');
+                    trainingStatus.classList.add('alert-warning');
+                    submitBtn.disabled = false;
+                    return;
+                }
+                
+                progressBar.style.width = progress + '%';
+                progressBar.textContent = progress + '%';
+                progressBar.setAttribute('aria-valuenow', progress);
+                
+                if (progress < 30) {
+                    trainingStatus.textContent = 'Preparing dataset...';
+                } else if (progress < 70) {
+                    trainingStatus.textContent = 'Training model (epoch ' + Math.floor((progress-30)/4) + ')...';
+                } else {
+                    trainingStatus.textContent = 'Finalizing and saving model...';
+                }
+            }, 500);
+            
+            // In a real application, we would submit to the server and handle progress updates
+            // via WebSockets or periodic AJAX calls
+        });
+    });
+</script>
+{% endblock %} 

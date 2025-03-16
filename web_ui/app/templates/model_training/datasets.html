@@ -1,0 +1,70 @@
+{% extends "shared/layout.html" %}
+
+{% block title %}ML-EASY - Datasets{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{{ url_for('home.index') }}">Home</a></li>
+            <li class="breadcrumb-item"><a href="{{ url_for('model_training.index') }}">Model Training</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Datasets</li>
+        </ol>
+    </nav>
+
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1>Datasets</h1>
+        <div>
+            <a href="{{ url_for('model_training.create_dataset') }}" class="btn btn-primary me-2">
+                <i class="fas fa-plus me-2"></i>Create New Dataset
+            </a>
+            <a href="{{ url_for('model_training.example_datasets') }}" class="btn btn-outline-primary me-2">
+                <i class="fas fa-download me-2"></i>Example Datasets
+            </a>
+            <a href="{{ url_for('model_training.webscrape') }}" class="btn btn-outline-primary">
+                <i class="fas fa-globe me-2"></i>Web Scrape Images
+            </a>
+        </div>
+    </div>
+
+    {% if datasets %}
+    <div class="row row-cols-1 row-cols-md-3 g-4">
+        {% for dataset in datasets %}
+        <div class="col">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">{{ dataset }}</h5>
+                </div>
+                <div class="card-body">
+                    <p class="card-text">
+                        <i class="fas fa-folder-open text-primary me-2"></i>Dataset with multiple classes
+                    </p>
+                    <div class="d-grid gap-2">
+                        <a href="{{ url_for('model_training.edit_dataset', dataset_name=dataset) }}" class="btn btn-outline-primary">
+                            <i class="fas fa-edit me-2"></i>Edit Dataset
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="card">
+        <div class="card-body text-center py-5">
+            <i class="fas fa-database fa-4x text-muted mb-3"></i>
+            <h3>No Datasets Available</h3>
+            <p class="lead">You haven't created any datasets yet.</p>
+            <div class="mt-4">
+                <a href="{{ url_for('model_training.create_dataset') }}" class="btn btn-primary me-2">
+                    <i class="fas fa-plus me-2"></i>Create New Dataset
+                </a>
+                <a href="{{ url_for('model_training.example_datasets') }}" class="btn btn-outline-primary">
+                    <i class="fas fa-download me-2"></i>Use Example Dataset
+                </a>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %} 
