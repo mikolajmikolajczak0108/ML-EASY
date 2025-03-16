@@ -2,7 +2,7 @@
 
 A user-friendly web application for creating, training, and using machine learning models without coding expertise.
 
-![ML-EASY Screenshot](https://github.com/mikolajmikolajczak0108/animal-recognition-app/raw/master/web_ui/app/static/images/screenshot.png)
+![ML-EASY Screenshot](https://github.com/mikolajmikolajczak0108/ML-EASY/raw/master/web_ui/app/static/images/screenshot.png)
 
 ## Overview
 
@@ -40,8 +40,8 @@ ML-EASY simplifies the machine learning workflow by providing an intuitive web i
 
 1. Clone the repository:
    ```
-   git clone https://github.com/mikolajmikolajczak0108/animal-recognition-app.git
-   cd animal-recognition-app/ML-EASY/web_ui
+   git clone https://github.com/mikolajmikolajczak0108/ML-EASY.git
+   cd ML-EASY/ML-EASY/web_ui
    ```
 
 2. Install dependencies:
