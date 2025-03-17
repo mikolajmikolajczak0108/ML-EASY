@@ -4,13 +4,24 @@ import json
 import logging
 import traceback
 import threading
+import shutil
 from pathlib import Path
+import tempfile
 
 from .utils import get_model_path, get_dataset_path
 
 # Initialize logger
 logger = logging.getLogger(__name__)
 
+# File lock for thread safety
+_status_locks = {}
+
+def get_status_lock(model_name):
+    """Get a lock for a specific model's status file to prevent race conditions."""
+    global _status_locks
+    if model_name not in _status_locks:
+        _status_locks[model_name] = threading.RLock()
+    return _status_locks[model_name]
 
 def train_model_task(model_name, dataset_name, architecture, epochs, batch_size, 
                     learning_rate, data_augmentation):
@@ -638,80 +649,115 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
 
 
 def update_training_status(model_name, status_update):
-    """Update the training status for a model."""
-    try:
-        # Get path to status file
-        status_dir = os.path.join(get_model_path(), 'training_status')
-        os.makedirs(status_dir, exist_ok=True)
-        status_file = os.path.join(status_dir, f"{model_name}.json")
-        
-        # If file exists, read and update
-        status = {
-            'model_name': model_name,
-            'started_at': str(time.time()),
-            'status': 'initializing',
-            'progress': 0
-        }
-        
-        if os.path.exists(status_file):
-            try:
-                with open(status_file, 'r') as f:
-                    existing = json.load(f)
-                    # Only update if valid
-                    if isinstance(existing, dict):
-                        status.update(existing)
-            except (json.JSONDecodeError, ValueError) as e:
-                # File exists but is corrupt - log and continue with new status
-                logger.error(f"Error reading status file {status_file}, creating new status: {e}")
-                # Maybe backup the corrupt file for debugging
-                if os.path.getsize(status_file) > 0:
-                    corrupt_file = f"{status_file}.corrupt"
-                    try:
-                        import shutil
-                        shutil.copy2(status_file, corrupt_file)
-                        logger.info(f"Backed up corrupt status file to {corrupt_file}")
-                    except Exception as backup_err:
-                        logger.error(f"Failed to backup corrupt status file: {backup_err}")
-        
-        # Update status with new values
-        status.update(status_update)
-        
-        # Convert to JSON-serializable format
-        safe_status = safe_json_status(status)
-        
-        # If training completed, add completion time
-        if status_update.get('status') == 'completed':
-            safe_status['completed_at'] = str(time.time())
-        
-        # Write updated status to file - use atomic write pattern to prevent corruption
-        temp_file = f"{status_file}.tmp"
-        with open(temp_file, 'w') as f:
-            json.dump(safe_status, f, indent=2)
-        
-        # Rename temp file to actual file (atomic operation)
-        import os
-        if os.name == 'nt':  # Windows
-            # Windows requires removing the destination file first
-            if os.path.exists(status_file):
-                os.remove(status_file)
-        os.rename(temp_file, status_file)
+    """Update the training status for a model with thread safety."""
+    # Get lock for this model's status file
+    lock = get_status_lock(model_name)
+    
+    with lock:  # Ensure thread-safe access
+        try:
+            # Get path to status file
+            status_dir = os.path.join(get_model_path(), 'training_status')
+            os.makedirs(status_dir, exist_ok=True)
+            status_file = os.path.join(status_dir, f"{model_name}.json")
             
-        logger.debug(f"Updated training status for {model_name}: {status_update.get('status')}")
-    except Exception as e:
-        logger.error(f"Error updating training status: {e}")
+            # Start with a clean base status
+            status = {
+                'model_name': model_name,
+                'started_at': str(time.time()),
+                'status': 'initializing',
+                'progress': 0
+            }
+            
+            # Try to read existing status if available
+            if os.path.exists(status_file):
+                try:
+                    with open(status_file, 'r') as f:
+                        file_content = f.read().strip()
+                        if file_content:  # Make sure file isn't empty
+                            existing = json.loads(file_content)
+                            if isinstance(existing, dict):
+                                status.update(existing)
+                except (json.JSONDecodeError, ValueError) as e:
+                    # File exists but is corrupt - log and recreate
+                    logger.error(f"Error reading status file {status_file}, creating new status: {e}")
+                    # Backup the corrupt file for debugging
+                    if os.path.exists(status_file) and os.path.getsize(status_file) > 0:
+                        corrupt_file = f"{status_file}.corrupt.{int(time.time())}"
+                        try:
+                            shutil.copy2(status_file, corrupt_file)
+                            logger.info(f"Backed up corrupt status file to {corrupt_file}")
+                        except Exception as backup_err:
+                            logger.error(f"Failed to backup corrupt status file: {backup_err}")
+            
+            # Update status with new values
+            status.update(status_update)
+            
+            # Convert to JSON-serializable format
+            safe_status = safe_json_status(status)
+            
+            # If training completed, add completion time
+            if status_update.get('status') == 'completed':
+                safe_status['completed_at'] = str(time.time())
+            
+            # Write to a temporary file first to ensure atomic update
+            try:
+                # Create a temp file in the same directory for atomic move
+                fd, temp_path = tempfile.mkstemp(dir=status_dir, prefix=f"{model_name}_", suffix=".tmp")
+                with os.fdopen(fd, 'w') as temp_file:
+                    json.dump(safe_status, temp_file, indent=2, default=str)
+                
+                # Make sure the temp file was written successfully
+                if os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:
+                    # Use atomic rename on the temp file
+                    if os.name == 'nt':  # Windows
+                        # Windows needs special handling for atomic replace
+                        if os.path.exists(status_file):
+                            os.replace(temp_path, status_file)
+                        else:
+                            os.rename(temp_path, status_file)
+                    else:
+                        # Unix systems support atomic replace
+                        os.rename(temp_path, status_file)
+                else:
+                    logger.error(f"Temporary file {temp_path} was not created properly")
+                    # Fallback to direct write if temp file approach failed
+                    with open(status_file, 'w') as f:
+                        json.dump(safe_status, f, indent=2, default=str)
+            except Exception as temp_err:
+                logger.error(f"Error with temp file approach: {temp_err}")
+                # Fallback to direct write
+                with open(status_file, 'w') as f:
+                    json.dump(safe_status, f, indent=2, default=str)
+                
+            logger.debug(f"Updated training status for {model_name}: {status_update.get('status')}")
+        except Exception as e:
+            logger.error(f"Error updating training status: {e}")
+            logger.error(traceback.format_exc())
 
 
 def get_training_status(model_name):
     """Get the current training status for a model."""
-    try:
-        status_file = os.path.join(get_model_path(), 'training_status', f"{model_name}.json")
-        if os.path.exists(status_file):
-            with open(status_file, 'r') as f:
-                return json.load(f)
-        return {'status': 'not_found'}
-    except Exception as e:
-        logger.error(f"Error getting training status: {e}")
-        return {'status': 'error', 'error': str(e)}
+    # Get lock for this model's status file
+    lock = get_status_lock(model_name)
+    
+    with lock:  # Ensure thread-safe access
+        try:
+            status_file = os.path.join(get_model_path(), 'training_status', f"{model_name}.json")
+            if os.path.exists(status_file):
+                try:
+                    with open(status_file, 'r') as f:
+                        content = f.read().strip()
+                        if content:
+                            return json.loads(content)
+                        else:
+                            return {'status': 'empty_file'}
+                except json.JSONDecodeError as e:
+                    logger.error(f"JSON decode error in status file: {e}")
+                    return {'status': 'error', 'error': f"Corrupted status file: {str(e)}"}
+            return {'status': 'not_found'}
+        except Exception as e:
+            logger.error(f"Error getting training status: {e}")
+            return {'status': 'error', 'error': str(e)}
 
 
 def start_model_training(model_name, dataset_name, architecture, epochs, batch_size, 
@@ -843,6 +889,11 @@ def safe_json_status(status_dict):
             elif isinstance(obj, (list, tuple)):
                 # Process lists and tuples
                 return [make_serializable(item) for item in obj]
+            elif isinstance(obj, float):
+                # Handle NaN, Infinity which are not JSON serializable
+                if not isinstance(obj, bool) and not (float('-inf') < obj < float('inf')):
+                    return str(obj)
+                return obj
             elif hasattr(obj, '__dict__'):
                 # Handle class instances
                 return str(obj)
@@ -852,12 +903,28 @@ def safe_json_status(status_dict):
                 
         # Process the entire status dictionary
         serializable_status = make_serializable(status)
-        return serializable_status
+        
+        # Validate by trying to serialize to JSON string and back
+        try:
+            json_str = json.dumps(serializable_status)
+            json.loads(json_str)  # Make sure it can be parsed back
+            return serializable_status
+        except (TypeError, ValueError) as json_err:
+            logger.error(f"JSON serialization validation failed: {json_err}")
+            # If validation fails, return a simple safe version
+            return {
+                'status': status.get('status', 'error'),
+                'message': status.get('message', 'Serialization error'),
+                'model_name': status.get('model_name', ''),
+                'progress': status.get('progress', 0)
+            }
         
     except Exception as e:
         logger.error(f"Error preparing status for JSON: {e}")
         # Return a simplified version that will definitely serialize
         return {
             'status': status_dict.get('status', 'error'),
-            'message': status_dict.get('message', 'Error preparing status') 
+            'message': status_dict.get('message', 'Error preparing status'),
+            'model_name': status_dict.get('model_name', ''),
+            'progress': status_dict.get('progress', 0)
         } 
