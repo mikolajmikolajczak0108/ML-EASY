@@ -5,9 +5,14 @@ import os
 import cv2
 import numpy as np
 import time
+import sys
+import subprocess
+import threading
+import queue
+import json
 from flask import (
     Blueprint, render_template, request, jsonify, 
-    current_app, redirect, url_for
+    current_app, redirect, url_for, Response
 )
 from werkzeug.utils import secure_filename
 
@@ -25,6 +30,143 @@ model_testing_bp = Blueprint(
     url_prefix='/test',
     template_folder='../../templates/model_testing'
 )
+
+# Global variables for installation status
+installation_queue = queue.Queue()
+installation_status = {
+    'status': 'idle',
+    'progress': 0,
+    'message': '',
+    'success': False,
+    'error': ''
+}
+
+def install_tensorflow_thread():
+    """Background thread to install TensorFlow"""
+    global installation_status
+    
+    try:
+        # Update status
+        installation_status = {
+            'status': 'installing',
+            'progress': 10,
+            'message': 'Installing TensorFlow and dependencies...',
+            'success': False,
+            'error': ''
+        }
+        installation_queue.put(installation_status.copy())
+        
+        # Execute pip install command
+        process = subprocess.Popen(
+            [sys.executable, "-m", "pip", "install", "tensorflow", "numpy", "h5py"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        
+        # Update progress periodically
+        for i in range(5):
+            installation_status['progress'] = 10 + (i * 15)
+            installation_status['message'] = f'Installing TensorFlow... (this may take a few minutes)'
+            installation_queue.put(installation_status.copy())
+            time.sleep(5)  # Sleep to simulate progress
+        
+        # Get the command output
+        stdout, stderr = process.communicate()
+        
+        # Check if installation was successful
+        if process.returncode == 0:
+            installation_status = {
+                'status': 'completed',
+                'progress': 100,
+                'message': 'TensorFlow successfully installed!',
+                'success': True,
+                'error': ''
+            }
+        else:
+            installation_status = {
+                'status': 'completed',
+                'progress': 100,
+                'message': 'Failed to install TensorFlow',
+                'success': False,
+                'error': stderr
+            }
+    except Exception as e:
+        installation_status = {
+            'status': 'completed',
+            'progress': 100,
+            'message': 'Error during installation',
+            'success': False,
+            'error': str(e)
+        }
+    
+    # Put final status in queue
+    installation_queue.put(installation_status.copy())
+
+
+@model_testing_bp.route('/install_tensorflow', methods=['POST'])
+def install_tensorflow():
+    """Handle TensorFlow installation request"""
+    global installation_status
+    
+    # Reset status
+    installation_status = {
+        'status': 'starting',
+        'progress': 0,
+        'message': 'Starting installation...',
+        'success': False,
+        'error': ''
+    }
+    
+    # Clear the queue
+    while not installation_queue.empty():
+        installation_queue.get()
+    
+    # Start installation in background thread
+    thread = threading.Thread(target=install_tensorflow_thread)
+    thread.daemon = True
+    thread.start()
+    
+    return jsonify({
+        'success': True,
+        'message': 'Installation started'
+    })
+
+
+@model_testing_bp.route('/install_status')
+def install_status():
+    """Stream installation status updates using server-sent events"""
+    def generate():
+        while True:
+            try:
+                # Get latest status update from queue
+                status = installation_queue.get(timeout=1)
+                yield f"data: {json.dumps(status)}\n\n"
+                
+                # If installation is complete, end stream
+                if status['status'] == 'completed':
+                    break
+            except queue.Empty:
+                # If no updates, send the current status
+                yield f"data: {json.dumps(installation_status)}\n\n"
+                time.sleep(1)
+    
+    return Response(generate(), mimetype='text/event-stream')
+
+
+@model_testing_bp.route('/check_tensorflow')
+def check_tensorflow():
+    """Check if TensorFlow is installed"""
+    try:
+        import tensorflow
+        return jsonify({
+            'installed': True,
+            'version': tensorflow.__version__
+        })
+    except ImportError:
+        return jsonify({
+            'installed': False
+        })
 
 
 @model_testing_bp.route('/')
