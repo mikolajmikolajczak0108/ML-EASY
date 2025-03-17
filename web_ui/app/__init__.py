@@ -87,6 +87,45 @@ def create_app(config_class=Config):
     # Register request/response loggers
     _register_request_handlers(app)
     
+    # Preload ML libraries for faster training
+    @app.before_first_request
+    def preload_ml_libraries():
+        """Preload ML libraries to avoid importing them during training."""
+        app.logger.info("Pre-loading ML libraries for model training...")
+        try:
+            # Import libraries in a separate thread to avoid blocking app startup
+            import threading
+            
+            def import_libraries():
+                try:
+                    import torch
+                    app.logger.info(f"PyTorch loaded: {torch.__version__}")
+                    
+                    # Import fastai vision library
+                    from fastai.vision.all import ImageDataLoaders, vision_learner
+                    app.logger.info("fastai.vision.all loaded")
+                    
+                    # Import fastai metrics
+                    from fastai.metrics import Precision, Recall, F1Score
+                    app.logger.info("fastai.metrics loaded")
+                    
+                    # Import torchvision models
+                    import torchvision.models as models
+                    app.logger.info("torchvision.models loaded")
+                    
+                    app.logger.info("All ML libraries pre-loaded successfully")
+                except Exception as e:
+                    app.logger.error(f"Error pre-loading ML libraries: {e}")
+            
+            # Start the thread for library import
+            import_thread = threading.Thread(target=import_libraries)
+            import_thread.daemon = True
+            import_thread.start()
+            app.logger.info("ML library preloading started in background")
+            
+        except Exception as e:
+            app.logger.error(f"Failed to start ML library preloading: {e}")
+    
     # Print startup time for optimization tracking
     logger.info(f"Application initialized in {time.time() - start_time:.2f} seconds")
     

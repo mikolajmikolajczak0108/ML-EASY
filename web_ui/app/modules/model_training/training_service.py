@@ -87,6 +87,47 @@ class PrintLogger:
         self.terminal.flush()
 
 
+# Pre-import PyTorch and fastai libraries at module level
+try:
+    logger.info("Pre-importing libraries at module initialization...")
+    
+    import torch
+    logger.info(f"PyTorch imported successfully: {torch.__version__}")
+    
+    # Import fastai vision library
+    from fastai.vision.all import (
+        ImageDataLoaders, 
+        Resize, 
+        vision_learner, 
+        error_rate, 
+        accuracy,
+        RandomResizedCrop,
+        aug_transforms
+    )
+    logger.info("fastai.vision.all imported successfully")
+    
+    # Import fastai metrics
+    from fastai.metrics import Precision, Recall, F1Score
+    logger.info("fastai.metrics imported successfully")
+    
+    # Import torchvision models
+    import torchvision.models as models
+    logger.info("torchvision.models imported successfully")
+    
+    # Flag to indicate successful imports
+    LIBRARIES_IMPORTED = True
+    logger.info("All ML libraries pre-imported successfully")
+    
+except ImportError as e:
+    logger.error(f"Failed to pre-import ML libraries: {e}")
+    logger.error(traceback.format_exc())
+    LIBRARIES_IMPORTED = False
+except Exception as e:
+    logger.error(f"Unexpected error during library pre-import: {e}")
+    logger.error(traceback.format_exc())
+    LIBRARIES_IMPORTED = False
+
+
 def train_model_task(model_name, dataset_name, architecture, epochs, batch_size, 
                     learning_rate, data_augmentation):
     """Background task to train a machine learning model with fastai/PyTorch."""
@@ -111,7 +152,6 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
         os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:64'
         
         # Disable multiprocessing for DataLoader (avoids Windows issues)
-        # Must be set before importing torch
         os.environ['FASTAI_NUM_WORKERS'] = '0'
         
         # Extract dataset name if it's in dictionary format
@@ -119,61 +159,35 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
             dataset_name = dataset_name['name']
             logger.info(f"Extracted dataset name from dictionary: {dataset_name}")
             
-        # First status update - starting model preparation
+        # First status update - checking libraries
         update_training_status(model_name, {
             'status': 'preparing',
             'progress': 5,
-            'stage': 'importing_libraries',
-            'message': 'Importing required libraries...'
+            'stage': 'checking_libraries',
+            'message': 'Checking required libraries...'
         })
             
         logger.info(f"Started training model: {model_name} with dataset: {dataset_name}")
-        print("Importing libraries... This might take a moment...")
         
-        # Import fastai/torch here to avoid blocking the main thread during import
-        try:
-            print("Importing PyTorch...")
-            import torch
-            print(f"PyTorch version: {torch.__version__}")
-            
-            # Only import what we actually need to use to speed up the process
-            print("Importing fastai.vision.all...")
-            from fastai.vision.all import (
-                ImageDataLoaders, 
-                Resize, 
-                vision_learner, 
-                error_rate, 
-                accuracy,
-                RandomResizedCrop,
-                aug_transforms
-            )
-            
-            print("Importing fastai.metrics...")
-            from fastai.metrics import Precision, Recall, F1Score
-            
-            # Import torchvision for models only
-            print("Importing torchvision.models...")
-            import torchvision.models as models
-            
-            # Libraries imported successfully
-            print("All libraries imported successfully!")
-            update_training_status(model_name, {
-                'status': 'preparing',
-                'progress': 10,
-                'stage': 'libraries_imported',
-                'message': 'Libraries imported successfully'
-            })
-            
-        except ImportError as e:
-            logger.error(f"Failed to import required libraries: {e}")
-            print(f"ERROR IMPORTING LIBRARIES: {e}")
-            print(traceback.format_exc())
+        # Check if libraries were successfully pre-imported
+        if not LIBRARIES_IMPORTED:
+            error_msg = "Required ML libraries were not properly imported during initialization. Check server logs."
+            print(f"ERROR: {error_msg}")
+            logger.error(error_msg)
             update_training_status(model_name, {
                 'status': 'error',
-                'error': f"Failed to import required libraries: {e}",
+                'error': error_msg,
                 'error_type': 'import_error'
             })
             return False
+            
+        print("Using pre-imported libraries - ready to proceed with training")
+        update_training_status(model_name, {
+            'status': 'preparing',
+            'progress': 10,
+            'stage': 'libraries_ready',
+            'message': 'ML libraries loaded successfully'
+        })
         
         # 1. Prepare dataset
         update_training_status(model_name, {
@@ -256,6 +270,7 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
             print(f"Using minimal transformations: Resize(224)")
             
         # Create DataLoaders
+        print("\n===== CREATING DATA LOADERS =====")
         update_training_status(model_name, {
             'status': 'preparing',
             'progress': 30,
@@ -263,12 +278,16 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
             'message': 'Creating DataLoaders...'
         })
         
-        print(f"\nCreating DataLoaders with batch size: {batch_size}")
+        print(f"Creating DataLoaders with batch size: {batch_size}")
         try:
             print(f"Creating Path object for dataset: {dataset_path}")
             path = Path(dataset_path)
-            print(f"Setting up DataLoaders with batch_size={batch_size}, transforms=Resize(224) + Augmentations: {data_augmentation}")
             
+            print(f"Data transformations: {'Using augmentations' if data_augmentation else 'Minimal transforms'}")
+            print(f"Batch size: {batch_size}, Workers: 0 (avoiding multiprocessing)")
+            
+            print("Calling ImageDataLoaders.from_folder()...")
+            start_time = time.time()
             dls = ImageDataLoaders.from_folder(
                 path,
                 valid_pct=0.2,
@@ -278,6 +297,8 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
                 batch_tfms=tfms,
                 num_workers=0  # Avoid Windows multiprocessing issues
             )
+            load_time = time.time() - start_time
+            print(f"DataLoaders created in {load_time:.2f} seconds")
             
             print(f"DataLoaders created. Number of classes: {len(dls.vocab)}")
             print(f"Class names: {dls.vocab}")
@@ -303,6 +324,7 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
             return False
             
         # Create the model
+        print("\n===== CREATING MODEL =====")
         update_training_status(model_name, {
             'status': 'preparing',
             'progress': 50,
@@ -311,7 +333,7 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
         })
         
         try:
-            print(f"\nCreating model with architecture: {architecture}")
+            print(f"Creating model with architecture: {architecture}")
             
             # Map architecture string to the correct architecture function
             arch_mapping = {
@@ -319,6 +341,9 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
                 'resnet34': models.resnet34,
                 'resnet50': models.resnet50,
                 'mobile': models.mobilenet_v2,
+                'MobileNetV2': models.mobilenet_v2,
+                'ResNet50': models.resnet50,
+                'EfficientNetB0': models.efficientnet_b0,
                 'efficientnet': models.efficientnet_b0
             }
             
@@ -331,6 +356,9 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
             
             # Create the learner
             print(f"Creating vision_learner with {len(dls.vocab)} classes")
+            print("This might take a moment to download pre-trained weights...")
+            
+            start_time = time.time()
             try:
                 learn = vision_learner(
                     dls, 
@@ -338,19 +366,24 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
                     metrics=[accuracy, error_rate, Precision(), Recall(), F1Score()],
                     pretrained=True
                 )
-                print(f"Model created successfully with metrics: accuracy, error_rate, Precision, Recall, F1Score")
+                creation_time = time.time() - start_time
+                print(f"Model created successfully in {creation_time:.2f} seconds")
+                print(f"Metrics: accuracy, error_rate, Precision, Recall, F1Score")
             except Exception as model_err:
                 print(f"Error creating vision_learner with {arch_fn.__name__}: {model_err}")
                 print("Trying with simpler ResNet18 architecture...")
                 
                 # Fallback to resnet18 which usually works
+                fallback_start = time.time()
                 learn = vision_learner(
                     dls, 
                     models.resnet18, 
                     metrics=[accuracy, error_rate],
                     pretrained=True
                 )
-                print("Fallback model created successfully with resnet18")
+                fallback_time = time.time() - fallback_start
+                print(f"Fallback model created successfully in {fallback_time:.2f} seconds")
+                print("Using ResNet18 with basic metrics (accuracy, error_rate)")
                 
             # Set learning rate
             print(f"Setting learning rate to {learning_rate}")
@@ -392,36 +425,50 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
         
         # Custom callback to update training status
         class StatusCallback():
+            """Custom callback to update training status."""
+            
             def __init__(self, model_name):
+                """Initialize the callback with model information."""
                 self.model_name = model_name
+                self.name = 'StatusCallback'  # Required by fastai
                 self.current_epoch = 0
-                self.total_epochs = epochs
+                self.total_epochs = 0
                 self.training_start_time = None
-                # Add name attribute for fastai compatibility
-                self.name = 'status_callback'
-                self.order = 0  # Lower order runs earlier
-                
+                self.epoch_start_time = None
+                self.learn = None
+            
             def __call__(self, event_name):
-                """Make the callback callable as required by fastai."""
-                # Map event names to handler methods
-                event_handlers = {
-                    'before_fit': self.before_fit,
-                    'before_epoch': self.before_epoch,
-                    'after_epoch': self.after_epoch,
-                    'after_fit': self.after_fit
-                }
-                
-                # Call appropriate handler if it exists
-                if event_name in event_handlers:
-                    try:
-                        event_handlers[event_name]()
-                    except Exception as e:
-                        logger.error(f"Error in callback {event_name}: {e}")
-                
+                """Handle callback events."""
+                try:
+                    # Add more debug information
+                    print(f"Callback event: {event_name}")
+                    
+                    # Delegate to specific event handlers
+                    if event_name == 'before_fit':
+                        self.before_fit()
+                    elif event_name == 'before_epoch':
+                        self.before_epoch()
+                    elif event_name == 'after_epoch':
+                        self.after_epoch()
+                    elif event_name == 'after_fit':
+                        self.after_fit()
+                except Exception as e:
+                    # Catch and log any errors in the callback
+                    logger.error(f"Error in StatusCallback event {event_name}: {e}")
+                    print(f"Error in callback ({event_name}): {e}")
+            
             def before_fit(self):
                 self.training_start_time = time.time()
                 try:
                     print("\n>> Training starting - before_fit callback")
+                    # Set total epochs based on the learner's n_epoch attribute if available
+                    try:
+                        if hasattr(self.learn, 'n_epoch'):
+                            self.total_epochs = self.learn.n_epoch
+                            print(f"Total epochs detected: {self.total_epochs}")
+                    except Exception as e:
+                        print(f"Could not determine total epochs: {e}")
+                        
                     update_training_status(self.model_name, {
                         'status': 'training',
                         'progress': 65,
@@ -429,21 +476,25 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
                         'epoch': 1,
                         'total_epochs': self.total_epochs,
                         'message': 'Starting model training...',
-                        'metrics': {}
+                        'metrics': {},
+                        'training_start': time.time()
                     })
+                    print("Training status updated: starting_training")
                 except Exception as e:
                     logger.error(f"Error updating status in before_fit: {e}")
                     print(f"Error in before_fit: {e}")
-                
+            
             def before_epoch(self):
                 try:
                     # Be defensive about accessing learn.epoch
                     epoch = 0
                     try:
-                        if hasattr(learn, 'epoch'):
-                            epoch = learn.epoch
+                        if hasattr(self.learn, 'epoch'):
+                            epoch = self.learn.epoch
                         self.current_epoch = epoch
-                    except:
+                        self.epoch_start_time = time.time()
+                    except Exception as e:
+                        print(f"Error getting epoch information: {e}")
                         pass
                     
                     print(f"\n>> Starting epoch {epoch+1}/{self.total_epochs}")
@@ -460,6 +511,7 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
                     
                     phase = 'freeze' if self.current_epoch == 0 else 'fine_tune'
                     print(f"Training phase: {phase}, Progress: {progress:.1f}%")
+                    print(f"Starting batch processing...")
                     
                     update_training_status(self.model_name, {
                         'status': 'training',
@@ -474,7 +526,7 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
                 except Exception as e:
                     logger.error(f"Error updating status in before_epoch: {e}")
                     print(f"Error in before_epoch: {e}")
-                
+            
             def after_epoch(self):
                 try:
                     # Safely get metrics
@@ -484,15 +536,20 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
                     accuracy_val = 0
                     error_rate_val = 0
                     
-                    print(f"\n>> Completed epoch {epoch+1}/{self.total_epochs}")
+                    # Calculate epoch duration
+                    epoch_duration = 0
+                    if self.epoch_start_time:
+                        epoch_duration = time.time() - self.epoch_start_time
+                        
+                    print(f"\n>> Completed epoch {epoch+1}/{self.total_epochs} in {epoch_duration:.2f} seconds")
                     
                     # Safely extract metrics
                     try:
-                        if hasattr(learn, 'recorder') and hasattr(learn.recorder, 'losses') and len(learn.recorder.losses) > 0:
-                            train_loss = float(learn.recorder.losses[-1])
+                        if hasattr(self.learn, 'recorder') and hasattr(self.learn.recorder, 'losses') and len(self.learn.recorder.losses) > 0:
+                            train_loss = float(self.learn.recorder.losses[-1])
                             
-                        if hasattr(learn, 'recorder') and hasattr(learn.recorder, 'values') and len(learn.recorder.values) > 0:
-                            values = learn.recorder.values[-1]
+                        if hasattr(self.learn, 'recorder') and hasattr(self.learn.recorder, 'values') and len(self.learn.recorder.values) > 0:
+                            values = self.learn.recorder.values[-1]
                             if len(values) > 0:
                                 valid_loss = float(values[0])
                             if len(values) > 1:
@@ -502,6 +559,7 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
                                 
                         print(f"Metrics - Train loss: {train_loss:.4f}, Validation loss: {valid_loss:.4f}")
                         print(f"Accuracy: {accuracy_val:.4f} ({accuracy_val*100:.2f}%), Error rate: {error_rate_val:.4f}")
+                        print(f"Learning rate: {self.learn.opt.hypers[-1]['lr'] if hasattr(self.learn, 'opt') and hasattr(self.learn.opt, 'hypers') else 'unknown'}")
                         
                     except Exception as metric_err:
                         logger.error(f"Error extracting metrics: {metric_err}")
@@ -520,6 +578,16 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
                     
                     print(f"Training progress: {min(95, progress):.1f}%")
                     
+                    # Calculate total training time so far
+                    total_time = 0
+                    if self.training_start_time:
+                        total_time = time.time() - self.training_start_time
+                        time_per_epoch = total_time / (epoch + 1)
+                        estimated_remaining = time_per_epoch * (self.total_epochs - epoch - 1)
+                        
+                        print(f"Total training time: {format_duration(total_time)}")
+                        print(f"Estimated time remaining: {format_duration(estimated_remaining)}")
+                    
                     # Update training status with detailed metrics
                     update_training_status(self.model_name, {
                         'status': 'training',
@@ -535,7 +603,9 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
                             'val_loss': valid_loss,
                             'val_accuracy': 1 - error_rate_val,
                             'epoch': epoch + 1,
-                            'total_epochs': self.total_epochs
+                            'total_epochs': self.total_epochs,
+                            'epoch_duration': epoch_duration,
+                            'total_duration': total_time
                         }
                     })
                     logger.info(f"Epoch {epoch+1}/{self.total_epochs} complete. Loss: {train_loss:.4f}, Accuracy: {accuracy_val:.4f}")
@@ -546,12 +616,19 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
             def after_fit(self):
                 try:
                     # Update status when training is complete
+                    total_time = 0
+                    if self.training_start_time:
+                        total_time = time.time() - self.training_start_time
+                        
                     print("\n>> Training complete - after_fit callback")
+                    print(f"Total training time: {format_duration(total_time)}")
+                    
                     update_training_status(self.model_name, {
                         'status': 'saving',
                         'progress': 95,
                         'stage': 'training_complete',
                         'message': 'Training complete, saving model...',
+                        'total_duration': total_time
                     })
                 except Exception as e:
                     logger.error(f"Error updating status in after_fit: {e}")
@@ -1004,3 +1081,15 @@ def safe_json_status(status_dict):
             'model_name': status_dict.get('model_name', ''),
             'progress': status_dict.get('progress', 0)
         } 
+
+# Helper function to format durations 
+def format_duration(seconds):
+    """Format a duration in seconds to a human-readable string."""
+    if seconds < 60:
+        return f"{seconds:.1f} seconds"
+    elif seconds < 3600:
+        minutes = seconds / 60
+        return f"{minutes:.1f} minutes"
+    else:
+        hours = seconds / 3600
+        return f"{hours:.1f} hours" 
