@@ -53,11 +53,6 @@
                                 <div class="form-text">
                                     Choose the model you want to test your image against.
                                 </div>
-                                <div class="alert alert-warning mt-2">
-                                    <i class="fas fa-exclamation-triangle me-2"></i>
-                                    <strong>Note:</strong> TensorFlow models (.h5 format) require TensorFlow to be installed.
-                                    If you encounter errors, please install TensorFlow using <code>pip install tensorflow</code>.
-                                </div>
                             </div>
                             
                             <div class="mb-3">
@@ -95,11 +90,6 @@
                                     <option value="{{ model }}">{{ model }}</option>
                                     {% endfor %}
                                 </select>
-                                <div class="alert alert-warning mt-2">
-                                    <i class="fas fa-exclamation-triangle me-2"></i>
-                                    <strong>Note:</strong> TensorFlow models (.h5 format) require TensorFlow to be installed.
-                                    If you encounter errors, please install TensorFlow using <code>pip install tensorflow</code>.
-                                </div>
                             </div>
                             
                             <div class="mb-3">
@@ -200,108 +190,14 @@
     </div>
 </div>
 
-<!-- TensorFlow Installation Modal -->
-<div class="modal fade" id="tensorflow-modal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">TensorFlow Required</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body">
-                <p>This model requires TensorFlow to run. Would you like to install it now?</p>
-                <div class="alert alert-info">
-                    <i class="fas fa-info-circle me-2"></i>
-                    This will install the following packages:
-                    <ul class="mb-0 mt-2">
-                        <li>tensorflow</li>
-                        <li>numpy</li>
-                        <li>h5py</li>
-                    </ul>
-                </div>
-                <div id="installation-status" class="d-none mt-3">
-                    <div class="progress mb-2">
-                        <div id="installation-progress" class="progress-bar progress-bar-striped progress-bar-animated" style="width: 0%"></div>
-                    </div>
-                    <p id="installation-message" class="text-muted small"></p>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary" id="install-tensorflow-btn">Install TensorFlow</button>
-            </div>
-        </div>
-    </div>
+<!-- Warning about model formats -->
+<div class="alert alert-info" role="alert">
+    <i class="fas fa-info-circle"></i> <strong>Note:</strong> This application supports FastAI models in PKL format only.
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-    // TensorFlow installation functionality
-    const tensorflowModal = new bootstrap.Modal(document.getElementById('tensorflow-modal'));
-    const installTensorflowBtn = document.getElementById('install-tensorflow-btn');
-    const installationStatus = document.getElementById('installation-status');
-    const installationProgress = document.getElementById('installation-progress');
-    const installationMessage = document.getElementById('installation-message');
-    
-    // Handle TensorFlow installation
-    installTensorflowBtn.addEventListener('click', function() {
-        // Disable the button and show progress
-        installTensorflowBtn.disabled = true;
-        installationStatus.classList.remove('d-none');
-        installationProgress.style.width = '10%';
-        installationMessage.textContent = 'Starting installation...';
-        
-        // Make the installation request
-        fetch('/test/install_tensorflow', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({})
-        })
-        .then(response => {
-            // Set up event source for real-time updates
-            const eventSource = new EventSource('/test/install_status');
-            
-            eventSource.onmessage = function(event) {
-                const data = JSON.parse(event.data);
-                
-                // Update progress bar and message
-                installationProgress.style.width = data.progress + '%';
-                installationMessage.textContent = data.message;
-                
-                // Handle completion
-                if (data.status === 'completed') {
-                    eventSource.close();
-                    
-                    setTimeout(() => {
-                        if (data.success) {
-                            alert('TensorFlow has been successfully installed! You can now use H5 models.');
-                            tensorflowModal.hide();
-                            location.reload(); // Reload the page to apply changes
-                        } else {
-                            alert('Failed to install TensorFlow: ' + data.error);
-                            installTensorflowBtn.disabled = false;
-                        }
-                    }, 1000);
-                }
-            };
-            
-            eventSource.onerror = function() {
-                eventSource.close();
-                installationMessage.textContent = 'Lost connection to server';
-                installTensorflowBtn.disabled = false;
-            };
-            
-            return response.json();
-        })
-        .catch(error => {
-            installationMessage.textContent = 'Error: ' + error;
-            installTensorflowBtn.disabled = false;
-        });
-    });
-    
     // Single image preview
     document.getElementById('image-upload').addEventListener('change', function(event) {
         const file = event.target.files[0];
@@ -337,15 +233,6 @@
             document.getElementById('batch-preview-container').classList.add('d-none');
         }
     });
-    
-    // Function to handle TensorFlow errors
-    function handleTensorFlowError(errorMessage) {
-        if (errorMessage.includes('TensorFlow') || errorMessage.includes('tensorflow')) {
-            tensorflowModal.show();
-            return true;
-        }
-        return false;
-    }
     
     // Single test form submission
     document.getElementById('single-test-form').addEventListener('submit', function(event) {
@@ -402,11 +289,8 @@
                     }
                 });
             } else {
-                // Check if this is a TensorFlow error
-                if (!handleTensorFlowError(data.error)) {
-                    // If not a TensorFlow error, show regular error
-                    alert('Error: ' + data.error);
-                }
+                // If not a TensorFlow error, show regular error
+                alert('Error: ' + data.error);
             }
         })
         .catch(error => {
@@ -436,11 +320,8 @@
                 // (implementation will be completed in the next phase)
                 alert('Batch processing completed successfully!');
             } else {
-                // Check if this is a TensorFlow error
-                if (!handleTensorFlowError(data.error)) {
-                    // If not a TensorFlow error, show regular error
-                    alert('Error: ' + data.error);
-                }
+                // If not a TensorFlow error, show regular error
+                alert('Error: ' + data.error);
             }
         })
         .catch(error => {

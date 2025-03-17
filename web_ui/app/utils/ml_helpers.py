@@ -33,20 +33,20 @@ def get_available_models():
     base_models_path = current_app.config['MODEL_PATH']
     models = []
     
-    print(f"DEBUG - Looking for models in: {base_models_path}")
-    print(f"DEBUG - Directory exists: {os.path.exists(base_models_path)}")
+    logging.debug(f"Looking for models in: {base_models_path}")
+    logging.debug(f"Directory exists: {os.path.exists(base_models_path)}")
     
     # Function to recursively find model files
     def find_model_files(directory):
         found_models = []
         if not os.path.exists(directory):
-            print(f"DEBUG - Directory does not exist: {directory}")
+            logging.debug(f"Directory does not exist: {directory}")
             return found_models
             
         for root, dirs, files in os.walk(directory):
-            print(f"DEBUG - Searching directory: {root}")
-            print(f"DEBUG - Subdirectories found: {dirs}")
-            print(f"DEBUG - Files found: {files}")
+            logging.debug(f"Searching directory: {root}")
+            logging.debug(f"Subdirectories found: {dirs}")
+            logging.debug(f"Files found: {files}")
             
             # Check for model files in current directory
             for file in files:
@@ -60,7 +60,7 @@ def get_available_models():
                         # If in root directory, use filename without extension
                         model_name = os.path.splitext(file)[0]
                     else:
-                        # Check if we're in a nested structure like saved_models/CatsDogs
+                        # Check if we're in a nested structure
                         path_parts = rel_path.split(os.sep)
                         if len(path_parts) > 1:
                             # Use the deepest directory name that's not 'saved_models'
@@ -72,12 +72,12 @@ def get_available_models():
                                 model_name = os.path.splitext(file)[0]
                         else:
                             # Use directory name
-                            model_name = os.path.basename(root)
+                            model_name = os.path.basename(rel_path)
                     
                     # Clean up model name if needed
                     if model_name.lower() in ('model', 'models'):
                         # If model name is generic, use parent directory + filename
-                        parent_dir = os.path.basename(os.path.dirname(root))
+                        parent_dir = os.path.basename(os.path.dirname(rel_path))
                         if parent_dir and parent_dir.lower() not in ('model', 'models'):
                             model_name = f"{parent_dir}_{os.path.splitext(file)[0]}"
                         else:
@@ -85,26 +85,31 @@ def get_available_models():
                     
                     if model_name not in found_models:
                         found_models.append(model_name)
-                        print(f"DEBUG - Found model: {model_name} in {rel_path}/{file}")
+                        logging.debug(
+                            f"Found model: {model_name} in {rel_path}/{file}"
+                        )
                         
         return found_models
     
     # Find all model files recursively
     models = find_model_files(base_models_path)
     
-    # If no models found, try looking for metadata.json files which might indicate models
+    # If no models found, try looking for metadata.json files
     if not models:
-        print("DEBUG - No models found with standard extensions, looking for metadata")
+        logging.debug(
+            "No models found with standard extensions, looking for metadata"
+        )
         for root, dirs, files in os.walk(base_models_path):
             for file in files:
                 if file.lower() == 'metadata.json':
                     # Extract model name from directory containing metadata
-                    model_dir = os.path.basename(root)
+                    rel_path = os.path.relpath(root, base_models_path)
+                    model_dir = os.path.basename(rel_path)
                     if model_dir and model_dir not in models:
                         models.append(model_dir)
-                        print(f"DEBUG - Found model via metadata: {model_dir}")
+                        logging.debug(f"Found model via metadata: {model_dir}")
     
-    print(f"DEBUG - Final models list: {models}")
+    logging.debug(f"Final models list: {models}")
     return models
 
 
@@ -148,7 +153,7 @@ def load_model(model_name):
         model_name (str): Name of the model
         
     Returns:
-        fastai.Learner or keras.Model: Loaded model
+        fastai.Learner: Loaded model
     """
     # Path to saved models
     models_dir = current_app.config['MODEL_PATH']
@@ -157,76 +162,38 @@ def load_model(model_name):
     
     logging.info(f"Attempting to load model: {model_name} from path: {model_dir}")
     
-    # Check if model exists
-    if not os.path.exists(model_dir):
-        # Check common file extensions directly
-        h5_path = os.path.normpath(os.path.join(saved_models_dir, f"{model_name}.h5"))
-        pkl_path = os.path.normpath(os.path.join(saved_models_dir, f"{model_name}.pkl"))
-        export_path = os.path.normpath(os.path.join(saved_models_dir, f"{model_name}.export"))
+    # Check if model exists as a directory
+    if os.path.exists(model_dir) and os.path.isdir(model_dir):
+        # Look for export.pkl or model.pkl in the directory
+        export_path = os.path.join(model_dir, 'export.pkl')
+        model_pkl_path = os.path.join(model_dir, 'model.pkl')
         
-        if os.path.exists(h5_path):
-            model_path = h5_path
-            logging.info(f"Found model at: {model_path}")
-        elif os.path.exists(pkl_path):
-            model_path = pkl_path
-            logging.info(f"Found model at: {model_path}")
-        elif os.path.exists(export_path):
+        if os.path.exists(export_path):
             model_path = export_path
+            logging.info(f"Found export.pkl at: {model_path}")
+        elif os.path.exists(model_pkl_path):
+            model_path = model_pkl_path
+            logging.info(f"Found model.pkl at: {model_path}")
+        else:
+            # Check for any .pkl file
+            pkl_files = [f for f in os.listdir(model_dir) if f.endswith('.pkl')]
+            if pkl_files:
+                model_path = os.path.join(model_dir, pkl_files[0])
+                logging.info(f"Found PKL file at: {model_path}")
+            else:
+                logging.error(f"No pickle model file found in directory: {model_dir}")
+                return None
+    else:
+        # Check for model files directly
+        pkl_path = os.path.join(saved_models_dir, f"{model_name}.pkl")
+        if os.path.exists(pkl_path):
+            model_path = pkl_path
             logging.info(f"Found model at: {model_path}")
         else:
             logging.error(f"Model {model_name} not found in {saved_models_dir}")
             return None
-    else:
-        # Use the directory itself (for fastai models exported as directories)
-        model_path = model_dir
-        logging.info(f"Found model directory at: {model_path}")
     
-    # Try to detect model type based on file extension or directory structure
-    if model_path.endswith('.h5'):
-        # Try multiple methods to detect TensorFlow
-        tensorflow_found = False
-        
-        # Method 1: Direct import
-        try:
-            import tensorflow as tf
-            tensorflow_found = True
-            logging.info("TensorFlow detected via direct import")
-        except ImportError:
-            logging.warning("Failed to import TensorFlow directly")
-            pass
-        
-        # Method 2: Check with subprocess if direct import fails
-        if not tensorflow_found:
-            try:
-                import subprocess, sys
-                result = subprocess.run(
-                    [sys.executable, "-c", "import tensorflow"], 
-                    capture_output=True, text=True, check=False
-                )
-                if result.returncode == 0:
-                    tensorflow_found = True
-                    logging.info("TensorFlow detected via subprocess check")
-            except Exception as e:
-                logging.warning(f"Failed to check TensorFlow via subprocess: {e}")
-                pass
-        
-        # If we found TensorFlow, load the model
-        if tensorflow_found:
-            try:
-                import tensorflow as tf
-                logging.info(f"Loading Keras model from: {model_path}")
-                model = tf.keras.models.load_model(model_path)
-                return model
-            except Exception as e:
-                logging.error(f"Error loading Keras model: {e}")
-                return None
-        else:
-            # TensorFlow not available
-            error_msg = "TensorFlow required to load .h5 models. Please install TensorFlow first."
-            logging.error(f"Error loading model {model_name}: {error_msg}")
-            raise ImportError(error_msg)
-    
-    # Default to fastai for other model types
+    # Load the model using fastai
     try:
         # First try to check if we have read access
         try:
@@ -253,26 +220,6 @@ def load_model(model_name):
         return None
     except Exception as e:
         logging.error(f"Error loading fastai model: {e}")
-        
-        # Try one last method - if it's a directory, look for an export.pkl file inside
-        if os.path.isdir(model_path):
-            try:
-                export_path = os.path.join(model_path, 'export.pkl')
-                if os.path.exists(export_path):
-                    logging.info(f"Trying to load model from export.pkl: {export_path}")
-                    # Temporarily suppress the pickle warning
-                    import warnings
-                    with warnings.catch_warnings():
-                        warnings.filterwarnings("ignore", category=UserWarning, 
-                                            message="load_learner` uses Python's insecure pickle module")
-                        model = load_learner(export_path)
-                        return model
-            except PermissionError as pe:
-                logging.error(f"Permission denied when loading export.pkl: {pe}")
-                return None
-            except Exception as e2:
-                logging.error(f"Error loading fastai model from export.pkl: {e2}")
-        
         return None
 
 

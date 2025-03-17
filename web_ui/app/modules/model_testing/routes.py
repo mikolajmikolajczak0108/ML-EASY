@@ -3,13 +3,8 @@ Routes for the model testing module.
 """
 import os
 import time
-import sys
-import subprocess
-import threading
-import queue
-import json
 from flask import (
-    Blueprint, render_template, request, jsonify, Response
+    Blueprint, render_template, request, jsonify
 )
 from werkzeug.utils import secure_filename
 
@@ -27,248 +22,6 @@ model_testing_bp = Blueprint(
     url_prefix='/test',
     template_folder='../../templates/model_testing'
 )
-
-# Global variables for installation status
-installation_queue = queue.Queue()
-installation_status = {
-    'status': 'idle',
-    'progress': 0,
-    'message': '',
-    'success': False,
-    'error': ''
-}
-
-def install_tensorflow_thread():
-    """Background thread to install TensorFlow"""
-    global installation_status
-    
-    try:
-        # Update status
-        installation_status = {
-            'status': 'installing',
-            'progress': 5,
-            'message': 'Checking current Python environment...',
-            'success': False,
-            'error': ''
-        }
-        installation_queue.put(installation_status.copy())
-        time.sleep(1)
-        
-        # First check if TensorFlow is already installed
-        try:
-            import tensorflow as tf
-            installation_status = {
-                'status': 'completed',
-                'progress': 100,
-                'message': f'TensorFlow {tf.__version__} is already installed!',
-                'success': True,
-                'error': ''
-            }
-            installation_queue.put(installation_status.copy())
-            return
-        except ImportError:
-            pass
-        
-        # Update status
-        installation_status = {
-            'status': 'installing',
-            'progress': 10,
-            'message': 'Starting TensorFlow installation...',
-            'success': False,
-            'error': ''
-        }
-        installation_queue.put(installation_status.copy())
-        time.sleep(1)
-        
-        # Execute pip install command with real-time output
-        process = subprocess.Popen(
-            [sys.executable, "-m", "pip", "install", "tensorflow", "numpy", "h5py"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            universal_newlines=True
-        )
-        
-        # Track installation progress
-        progress_markers = {
-            "Collecting": 15,
-            "Downloading": 25,
-            "Installing": 70,
-            "Successfully installed": 95
-        }
-        
-        # Read output line by line
-        current_progress = 10
-        for line in iter(process.stdout.readline, ''):
-            # Update progress based on output
-            line = line.strip()
-            if line:
-                for marker, progress in progress_markers.items():
-                    if marker in line:
-                        current_progress = max(current_progress, progress)
-                        break
-                
-                installation_status = {
-                    'status': 'installing',
-                    'progress': current_progress,
-                    'message': line,
-                    'success': False,
-                    'error': ''
-                }
-                installation_queue.put(installation_status.copy())
-        
-        # Check if installation was successful
-        process.wait()
-        if process.returncode == 0:
-            # Verify TensorFlow is now importable
-            try:
-                import tensorflow as tf
-                installation_status = {
-                    'status': 'completed',
-                    'progress': 100,
-                    'message': f'TensorFlow {tf.__version__} successfully installed!',
-                    'success': True,
-                    'error': ''
-                }
-            except ImportError:
-                installation_status = {
-                    'status': 'completed',
-                    'progress': 100,
-                    'message': 'Installation reported success, but TensorFlow cannot be imported. You may need to restart the application.',
-                    'success': True,
-                    'error': ''
-                }
-        else:
-            installation_status = {
-                'status': 'completed',
-                'progress': 100,
-                'message': 'Failed to install TensorFlow',
-                'success': False,
-                'error': 'Installation process failed. Try installing manually with: pip install tensorflow'
-            }
-    except Exception as e:
-        installation_status = {
-            'status': 'completed',
-            'progress': 100,
-            'message': 'Error during installation',
-            'success': False,
-            'error': str(e)
-        }
-    
-    # Put final status in queue
-    installation_queue.put(installation_status.copy())
-
-
-@model_testing_bp.route('/install_tensorflow', methods=['POST'])
-def install_tensorflow():
-    """Handle TensorFlow installation request"""
-    global installation_status
-    
-    # Reset status
-    installation_status = {
-        'status': 'starting',
-        'progress': 0,
-        'message': 'Starting installation...',
-        'success': False,
-        'error': ''
-    }
-    
-    # Clear the queue
-    while not installation_queue.empty():
-        try:
-            installation_queue.get(block=False)
-        except:
-            pass
-    
-    # Start installation in background thread
-    thread = threading.Thread(target=install_tensorflow_thread)
-    thread.daemon = True
-    thread.start()
-    
-    return jsonify({
-        'success': True,
-        'message': 'Installation started'
-    })
-
-
-@model_testing_bp.route('/install_status')
-def install_status():
-    """Stream installation status updates using server-sent events"""
-    def generate():
-        while True:
-            try:
-                # Get latest status update from queue
-                status = installation_queue.get(timeout=1)
-                yield f"data: {json.dumps(status)}\n\n"
-                
-                # If installation is complete, end stream
-                if status['status'] == 'completed':
-                    break
-            except queue.Empty:
-                # If no updates, send the current status
-                yield f"data: {json.dumps(installation_status)}\n\n"
-                time.sleep(1)
-    
-    return Response(generate(), mimetype='text/event-stream')
-
-
-@model_testing_bp.route('/check_tensorflow')
-def check_tensorflow():
-    """Check if TensorFlow is installed"""
-    try:
-        # Try multiple ways to detect TensorFlow
-        tf_installed = False
-        tf_version = "Unknown"
-        
-        # Method 1: Direct import
-        try:
-            import tensorflow as tf
-            tf_installed = True
-            tf_version = tf.__version__
-            return jsonify({
-                'installed': True,
-                'version': tf_version
-            })
-        except ImportError:
-            pass
-            
-        # Method 2: Check using subprocess
-        try:
-            result = subprocess.run([sys.executable, "-c", "import tensorflow; print(tensorflow.__version__)"], 
-                                   capture_output=True, text=True, check=False)
-            if result.returncode == 0:
-                tf_installed = True
-                tf_version = result.stdout.strip()
-                return jsonify({
-                    'installed': True,
-                    'version': tf_version
-                })
-        except Exception:
-            pass
-            
-        # Method 3: Check installed packages via pip
-        try:
-            result = subprocess.run([sys.executable, "-m", "pip", "list"], 
-                                   capture_output=True, text=True, check=False)
-            if "tensorflow" in result.stdout.lower():
-                tf_installed = True
-                return jsonify({
-                    'installed': True,
-                    'version': "Found in pip list"
-                })
-        except Exception:
-            pass
-        
-        return jsonify({
-            'installed': tf_installed,
-            'version': tf_version
-        })
-    except Exception as e:
-        return jsonify({
-            'installed': False,
-            'error': str(e)
-        })
 
 
 @model_testing_bp.route('/')
@@ -339,7 +92,7 @@ def classify_image():
         if model is None:
             return jsonify({
                 'success': False,
-                'error': 'Failed to load model. If this is a TensorFlow/Keras (.h5) model, you need to install TensorFlow.'
+                'error': 'Failed to load model. Please check if the model exists and is in PKL format.'
             }), 500
             
         # Create a PILImage from file path
@@ -373,10 +126,6 @@ def classify_image():
         
     except Exception as e:
         error_msg = str(e)
-        # Special handling for common errors
-        if "TensorFlow required" in error_msg or "No module named 'tensorflow'" in error_msg:
-            error_msg = "This model requires TensorFlow to be installed. Please install TensorFlow to use this model."
-            
         return jsonify({
             'success': False,
             'error': f'Error processing image: {error_msg}'
@@ -419,14 +168,10 @@ def batch_classify():
         if model is None:
             return jsonify({
                 'success': False,
-                'error': 'Failed to load model. If this is a TensorFlow/Keras (.h5) model, you need to install TensorFlow.'
+                'error': 'Failed to load model. Please check if the model exists and is in PKL format.'
             }), 500
     except Exception as e:
         error_msg = str(e)
-        # Special handling for common errors
-        if "TensorFlow required" in error_msg or "No module named 'tensorflow'" in error_msg:
-            error_msg = "This model requires TensorFlow to be installed. Please install TensorFlow to use this model."
-        
         return jsonify({
             'success': False,
             'error': f'Error loading model: {error_msg}'

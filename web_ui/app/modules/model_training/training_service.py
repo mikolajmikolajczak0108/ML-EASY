@@ -101,8 +101,12 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
             json.dump(metadata, f, indent=4)
         
         # Save a dummy model file to simulate the actual model
-        with open(os.path.join(model_dir, 'model.h5'), 'w') as f:
-            f.write("This is a placeholder for the actual model file")
+        with open(os.path.join(model_dir, 'model.pkl'), 'w') as f:
+            f.write("This is a placeholder for the actual model file in pickle format")
+        
+        # Create an export.pkl file as well for fastai compatibility
+        with open(os.path.join(model_dir, 'export.pkl'), 'w') as f:
+            f.write("This is a placeholder for the fastai export.pkl file")
         
         # 5. Mark training as complete
         update_training_status(model_name, {
@@ -209,10 +213,14 @@ def get_models():
                 if os.path.isdir(item_path) and item != 'saved_models' and item != 'training_status':
                     # Check if the directory contains model files
                     for file in os.listdir(item_path):
-                        if file.endswith('.pkl') or file.endswith('.h5'):
+                        if file.endswith('.pkl'):
                             if item not in models:
                                 models.append(item)
                                 break
+                        elif file.endswith('.h5') and item not in models:
+                            # Only add H5 models if no PKL files found
+                            models.append(item)
+                            break
         
         # Also check the saved_models subdirectory
         saved_models_path = os.path.join(base_models_path, 'saved_models')
@@ -224,10 +232,17 @@ def get_models():
                 if os.path.isdir(item_path):
                     # Check if the directory contains model files
                     has_model_file = False
+                    has_pkl_file = False
+                    
                     for file in os.listdir(item_path):
-                        if file.endswith('.pkl') or file.endswith('.h5') or file == 'metadata.json':
+                        if file.endswith('.pkl') or file == 'export.pkl':
                             has_model_file = True
+                            has_pkl_file = True
                             break
+                        elif file.endswith('.h5'):
+                            has_model_file = True
+                        elif file == 'metadata.json':
+                            has_model_file = True
                             
                     if has_model_file and item not in models:
                         models.append(item)
