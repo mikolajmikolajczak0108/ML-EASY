@@ -1,151 +1,462 @@
 {% extends "shared/layout.html" %}
 
-{% block title %}ML-EASY - Train Models{% endblock %}
+{% block title %}Model Training{% endblock %}
 
 {% block content %}
-<div class="row mb-4">
-    <div class="col-12">
-        <nav aria-label="breadcrumb">
-            <ol class="breadcrumb">
-                <li class="breadcrumb-item"><a href="/">Home</a></li>
-                <li class="breadcrumb-item active">Train Models</li>
-            </ol>
-        </nav>
-        <h1 class="mb-3">Train Models</h1>
-        <p class="lead">Create and train new machine learning models for image classification.</p>
-    </div>
-</div>
+<div class="container mt-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{{ url_for('home.index') }}">Home</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Model Training</li>
+        </ol>
+    </nav>
 
-<div class="row mb-5">
-    <div class="col-md-6 col-lg-4 mb-4">
-        <div class="card h-100">
-            <div class="card-body text-center">
-                <div class="display-4 text-primary mb-3">
-                    <i class="fas fa-cogs"></i>
-                </div>
-                <h5 class="card-title">Train from Scratch</h5>
-                <p class="card-text">Create a new model from scratch with your choice of architecture and dataset.</p>
-                <a href="{{ url_for('model_training.new_model') }}" class="btn btn-primary">
-                    <i class="fas fa-plus-circle me-2"></i>New Model
-                </a>
-            </div>
-        </div>
-    </div>
-    
-    <div class="col-md-6 col-lg-4 mb-4">
-        <div class="card h-100">
-            <div class="card-body text-center">
-                <div class="display-4 text-primary mb-3">
-                    <i class="fas fa-sliders-h"></i>
-                </div>
-                <h5 class="card-title">Fine-tune Model</h5>
-                <p class="card-text">Take an existing model and fine-tune it for your specific use case.</p>
-                <a href="{{ url_for('model_training.finetune') }}" class="btn btn-primary">
-                    <i class="fas fa-wrench me-2"></i>Fine-tune
-                </a>
-            </div>
-        </div>
-    </div>
-    
-    <div class="col-md-6 col-lg-4 mb-4">
-        <div class="card h-100">
-            <div class="card-body text-center">
-                <div class="display-4 text-primary mb-3">
-                    <i class="fas fa-database"></i>
-                </div>
-                <h5 class="card-title">Manage Datasets</h5>
-                <p class="card-text">Create, upload, and manage datasets for training your models.</p>
-                <a href="{{ url_for('model_training.datasets') }}" class="btn btn-primary">
-                    <i class="fas fa-folder-open me-2"></i>Datasets
-                </a>
-            </div>
-        </div>
-    </div>
-</div>
+    <ul class="nav nav-tabs mb-4" id="modelTrainingTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="overview-tab" data-bs-toggle="tab" data-bs-target="#overview" type="button" role="tab" aria-controls="overview" aria-selected="true">
+                <i class="fas fa-home me-2"></i>Overview
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="trainings-tab" data-bs-toggle="tab" data-bs-target="#trainings" type="button" role="tab" aria-controls="trainings" aria-selected="false">
+                <i class="fas fa-tasks me-2"></i>Trainings
+                <span class="badge bg-primary trainings-count" style="display: none;">0</span>
+            </button>
+        </li>
+    </ul>
 
-<div class="row">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-header">
-                <h5 class="mb-0">Training Options</h5>
-            </div>
-            <div class="card-body">
-                <h5 class="mb-3">Available Architectures</h5>
-                <div class="row mb-4">
-                    {% for arch in architectures %}
-                    <div class="col-md-4 mb-3">
-                        <div class="model-card">
-                            <h5>{{ arch }}</h5>
-                            <p class="text-muted mb-2">
-                                {% if 'resnet' in arch %}
-                                ResNet architecture with {{ arch|replace('resnet', '') }} layers
-                                {% elif 'mobilenet' in arch %}
-                                Lightweight mobile-optimized architecture
-                                {% elif 'densenet' in arch %}
-                                Dense architecture with {{ arch|replace('densenet', '') }} layers
-                                {% else %}
-                                Neural network architecture
-                                {% endif %}
-                            </p>
-                            <div>
-                                {% if 'resnet18' == arch %}
-                                <span class="badge bg-success">Fast</span>
-                                <span class="badge bg-warning text-dark">Lower Accuracy</span>
-                                {% elif 'resnet50' == arch %}
-                                <span class="badge bg-warning text-dark">Slower</span>
-                                <span class="badge bg-success">Higher Accuracy</span>
-                                {% elif 'mobilenet' in arch %}
-                                <span class="badge bg-success">Mobile-Friendly</span>
-                                <span class="badge bg-info">Optimized</span>
-                                {% elif 'densenet' in arch %}
-                                <span class="badge bg-info">Feature Reuse</span>
-                                <span class="badge bg-success">Efficient</span>
-                                {% else %}
-                                <span class="badge bg-primary">Standard</span>
-                                {% endif %}
+    <div class="tab-content" id="modelTrainingTabsContent">
+        <!-- Overview Tab Content -->
+        <div class="tab-pane fade show active" id="overview" role="tabpanel" aria-labelledby="overview-tab">
+            <div class="row mb-4">
+                <div class="col-md-6">
+                    <div class="card shadow h-100">
+                        <div class="card-header bg-primary text-white">
+                            <h5 class="mb-0"><i class="fas fa-brain me-2"></i>Create a New Model</h5>
+                        </div>
+                        <div class="card-body">
+                            <p>Train a new image classification model from scratch using your own dataset.</p>
+                            <h6>Features:</h6>
+                            <ul>
+                                <li>Select from multiple state-of-the-art architectures</li>
+                                <li>Customize training parameters</li>
+                                <li>Train on your own custom datasets</li>
+                                <li>Real-time training progress monitoring</li>
+                            </ul>
+                            <div class="text-center mt-3">
+                                <a href="{{ url_for('model_training.new_model') }}" class="btn btn-primary">
+                                    <i class="fas fa-plus-circle me-2"></i>Create New Model
+                                </a>
                             </div>
                         </div>
                     </div>
-                    {% endfor %}
                 </div>
-                
-                <h5 class="mb-3">Training Parameters</h5>
-                <div class="row">
-                    <div class="col-md-6">
-                        <div class="card mb-3">
-                            <div class="card-body">
-                                <h6 class="card-title">Learning Rate</h6>
-                                <p class="card-text">Controls how quickly the model adapts to the problem. A typical range is from 0.01 to 0.0001.</p>
+                <div class="col-md-6">
+                    <div class="card shadow h-100">
+                        <div class="card-header bg-success text-white">
+                            <h5 class="mb-0"><i class="fas fa-sync-alt me-2"></i>Fine-tune Existing Model</h5>
+                        </div>
+                        <div class="card-body">
+                            <p>Improve an existing model by fine-tuning it on your specific dataset.</p>
+                            <h6>Benefits:</h6>
+                            <ul>
+                                <li>Faster training compared to training from scratch</li>
+                                <li>Better performance with smaller datasets</li>
+                                <li>Adapt pre-trained models to your specific classes</li>
+                                <li>Transfer learning from one domain to another</li>
+                            </ul>
+                            <div class="text-center mt-3">
+                                <a href="{{ url_for('model_training.finetune') }}" class="btn btn-success">
+                                    <i class="fas fa-sliders-h me-2"></i>Fine-tune Model
+                                </a>
                             </div>
                         </div>
                     </div>
-                    <div class="col-md-6">
-                        <div class="card mb-3">
-                            <div class="card-body">
-                                <h6 class="card-title">Batch Size</h6>
-                                <p class="card-text">The number of samples processed before the model is updated. Common values are 16, 32, or 64.</p>
+                </div>
+            </div>
+
+            <div class="row mb-4">
+                <div class="col-md-6">
+                    <div class="card shadow h-100">
+                        <div class="card-header bg-info text-white">
+                            <h5 class="mb-0"><i class="fas fa-database me-2"></i>Manage Datasets</h5>
+                        </div>
+                        <div class="card-body">
+                            <p>Create and manage your own datasets for training machine learning models.</p>
+                            <h6>Options:</h6>
+                            <ul>
+                                <li>Create new custom datasets</li>
+                                <li>Upload images to your datasets</li>
+                                <li>Use example datasets to get started quickly</li>
+                                <li>Collect images from the web for your datasets</li>
+                            </ul>
+                            <div class="text-center mt-3">
+                                <a href="{{ url_for('model_training.datasets') }}" class="btn btn-info">
+                                    <i class="fas fa-folder-open me-2"></i>Manage Datasets
+                                </a>
                             </div>
                         </div>
                     </div>
-                    <div class="col-md-6">
-                        <div class="card mb-3">
-                            <div class="card-body">
-                                <h6 class="card-title">Epochs</h6>
-                                <p class="card-text">The number of times the learning algorithm will work through the entire training dataset.</p>
-                            </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="card shadow h-100">
+                        <div class="card-header bg-secondary text-white">
+                            <h5 class="mb-0"><i class="fas fa-graduation-cap me-2"></i>ML Tutorial</h5>
                         </div>
-                    </div>
-                    <div class="col-md-6">
-                        <div class="card mb-3">
-                            <div class="card-body">
-                                <h6 class="card-title">Image Size</h6>
-                                <p class="card-text">The size to which images are resized for training. Common values are 224x224 or 256x256 pixels.</p>
+                        <div class="card-body">
+                            <p>Learn the basics of machine learning and how to use this platform effectively.</p>
+                            <h6>Learn About:</h6>
+                            <ul>
+                                <li>Machine learning concepts and terminology</li>
+                                <li>How image classification models work</li>
+                                <li>Best practices for preparing datasets</li>
+                                <li>Tips for getting the best model performance</li>
+                            </ul>
+                            <div class="text-center mt-3">
+                                <a href="{{ url_for('model_training.ml_tutorial') }}" class="btn btn-secondary">
+                                    <i class="fas fa-book me-2"></i>View Tutorial
+                                </a>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
+
+        <!-- Trainings Tab Content -->
+        <div class="tab-pane fade" id="trainings" role="tabpanel" aria-labelledby="trainings-tab">
+            <div class="card shadow">
+                <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="fas fa-tasks me-2"></i>Training Tasks</h5>
+                    <button id="refreshTrainingsBtn" class="btn btn-sm btn-light">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                </div>
+                <div class="card-body">
+                    <!-- Active Trainings Section -->
+                    <h5 class="mb-3 border-bottom pb-2">Active Trainings</h5>
+                    <div id="activeTrainings" class="mb-4">
+                        <div class="text-center py-4 active-trainings-placeholder">
+                            <p class="text-muted"><i class="fas fa-spinner fa-spin me-2"></i>Loading active trainings...</p>
+                        </div>
+                        <!-- Active trainings will be added here by JavaScript -->
+                    </div>
+
+                    <!-- Completed Trainings Section -->
+                    <h5 class="mb-3 border-bottom pb-2">Completed Trainings</h5>
+                    <div id="completedTrainings">
+                        <div class="text-center py-4 completed-trainings-placeholder">
+                            <p class="text-muted"><i class="fas fa-spinner fa-spin me-2"></i>Loading completed trainings...</p>
+                        </div>
+                        <!-- Completed trainings will be added here by JavaScript -->
+                    </div>
+
+                    <!-- Failed Trainings Section -->
+                    <h5 class="mb-3 border-bottom pb-2">Failed Trainings</h5>
+                    <div id="failedTrainings">
+                        <div class="text-center py-4 failed-trainings-placeholder">
+                            <p class="text-muted"><i class="fas fa-spinner fa-spin me-2"></i>Loading failed trainings...</p>
+                        </div>
+                        <!-- Failed trainings will be added here by JavaScript -->
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Initialize trainings tab functionality
+        initTrainingsTab();
+        
+        // Initial load of training data
+        loadTrainingTasks();
+        
+        // Set up refresh button
+        document.getElementById('refreshTrainingsBtn').addEventListener('click', function() {
+            loadTrainingTasks();
+        });
+        
+        // Auto-refresh active trainings every 5 seconds
+        setInterval(loadTrainingTasks, 5000);
+    });
+    
+    function initTrainingsTab() {
+        // Set up tab switching event listeners if needed
+        const modelTrainingTabs = document.getElementById('modelTrainingTabs');
+        if (modelTrainingTabs) {
+            const tabTriggerList = [].slice.call(modelTrainingTabs.querySelectorAll('button[data-bs-toggle="tab"]'));
+            tabTriggerList.forEach(function(tabTriggerEl) {
+                tabTriggerEl.addEventListener('shown.bs.tab', function(event) {
+                    // Refresh data when switching to trainings tab
+                    if (event.target.id === 'trainings-tab') {
+                        loadTrainingTasks();
+                    }
+                });
+            });
+        }
+    }
+    
+    function loadTrainingTasks() {
+        // Fetch all training tasks statuses
+        fetch('/train/trainings/status')
+            .then(response => response.json())
+            .then(data => {
+                updateTrainingLists(data);
+            })
+            .catch(error => {
+                console.error('Error fetching training status:', error);
+                showTrainingLoadError();
+            });
+    }
+    
+    function updateTrainingLists(data) {
+        const activeTrainings = data.active || [];
+        const completedTrainings = data.completed || [];
+        const failedTrainings = data.failed || [];
+        
+        // Update badge count
+        updateActiveTrainingsCount(activeTrainings.length);
+        
+        // Update active trainings list
+        const activeContainer = document.getElementById('activeTrainings');
+        if (activeTrainings.length > 0) {
+            activeContainer.innerHTML = buildTrainingCards(activeTrainings, 'active');
+        } else {
+            activeContainer.innerHTML = '<p class="text-center text-muted py-3">No active training tasks</p>';
+        }
+        
+        // Update completed trainings list
+        const completedContainer = document.getElementById('completedTrainings');
+        if (completedTrainings.length > 0) {
+            completedContainer.innerHTML = buildTrainingCards(completedTrainings, 'completed');
+        } else {
+            completedContainer.innerHTML = '<p class="text-center text-muted py-3">No completed training tasks</p>';
+        }
+        
+        // Update failed trainings list
+        const failedContainer = document.getElementById('failedTrainings');
+        if (failedTrainings.length > 0) {
+            failedContainer.innerHTML = buildTrainingCards(failedTrainings, 'failed');
+        } else {
+            failedContainer.innerHTML = '<p class="text-center text-muted py-3">No failed training tasks</p>';
+        }
+    }
+    
+    function updateActiveTrainingsCount(count) {
+        const badge = document.querySelector('.trainings-count');
+        if (badge) {
+            if (count > 0) {
+                badge.textContent = count;
+                badge.style.display = 'inline';
+            } else {
+                badge.style.display = 'none';
+            }
+        }
+    }
+    
+    function buildTrainingCards(trainings, type) {
+        let html = '<div class="row">';
+        
+        trainings.forEach(training => {
+            const progress = Math.min(100, Math.max(0, training.progress || 0));
+            const statusClass = getStatusClass(training.status);
+            const metrics = training.metrics || {};
+            const stage = training.stage || 'unknown';
+            const startTime = training.start_time ? new Date(training.start_time).toLocaleString() : 'Unknown';
+            
+            html += `
+            <div class="col-md-6 mb-3">
+                <div class="card shadow-sm">
+                    <div class="card-header ${statusClass} text-white d-flex justify-content-between align-items-center">
+                        <h6 class="mb-0">${training.model_name}</h6>
+                        <span class="badge bg-light text-dark">${training.status}</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-2 d-flex justify-content-between">
+                            <small>Dataset: <strong>${training.dataset}</strong></small>
+                            <small>Architecture: <strong>${training.architecture}</strong></small>
+                        </div>
+                        
+                        <div class="progress mb-3" style="height: 20px;">
+                            <div class="progress-bar ${statusClass}" role="progressbar" 
+                                style="width: ${progress}%" aria-valuenow="${progress}" 
+                                aria-valuemin="0" aria-valuemax="100">${progress.toFixed(0)}%</div>
+                        </div>
+                        
+                        <p class="text-muted mb-2">${training.message || getStageMessage(stage)}</p>
+                        
+                        ${type === 'active' ? getActiveTrainingDetails(training) : ''}
+                        ${type === 'completed' ? getCompletedTrainingDetails(training) : ''}
+                        ${type === 'failed' ? getFailedTrainingDetails(training) : ''}
+                        
+                        <div class="mt-3 text-end">
+                            <small class="text-muted">Started: ${startTime}</small>
+                        </div>
+                    </div>
+                </div>
+            </div>`;
+        });
+        
+        html += '</div>';
+        return html;
+    }
+    
+    function getActiveTrainingDetails(training) {
+        const metrics = training.metrics || {};
+        const epoch = training.epoch || 0;
+        const totalEpochs = training.total_epochs || '?';
+        
+        // Only show metrics if they exist and we're in training stage
+        if (training.status === 'training' && metrics.accuracy !== undefined) {
+            return `
+            <div class="row small mb-2">
+                <div class="col-6">
+                    <div class="d-flex justify-content-between">
+                        <span>Loss:</span>
+                        <span>${metrics.loss?.toFixed(4) || '-'}</span>
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <span>Accuracy:</span>
+                        <span>${(metrics.accuracy * 100)?.toFixed(2) || '-'}%</span>
+                    </div>
+                </div>
+                <div class="col-6">
+                    <div class="d-flex justify-content-between">
+                        <span>Val Loss:</span>
+                        <span>${metrics.val_loss?.toFixed(4) || '-'}</span>
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <span>Val Accuracy:</span>
+                        <span>${(metrics.val_accuracy * 100)?.toFixed(2) || '-'}%</span>
+                    </div>
+                </div>
+            </div>
+            <div class="d-flex justify-content-between align-items-center mt-2">
+                <small>Epoch: ${epoch}/${totalEpochs}</small>
+                <button class="btn btn-sm btn-outline-secondary" 
+                    onclick="window.location.href='/train/models/${training.model_name}/status'">
+                    View Details
+                </button>
+            </div>`;
+        } else {
+            return `
+            <div class="d-flex justify-content-between align-items-center mt-2">
+                <small>${getStageMessage(training.stage)}</small>
+                <button class="btn btn-sm btn-outline-secondary" 
+                    onclick="window.location.href='/train/models/${training.model_name}/status'">
+                    View Details
+                </button>
+            </div>`;
+        }
+    }
+    
+    function getCompletedTrainingDetails(training) {
+        const metrics = training.metrics || {};
+        return `
+        <div class="row small mb-2">
+            <div class="col-6">
+                <div class="d-flex justify-content-between">
+                    <span>Final Accuracy:</span>
+                    <span>${(metrics.accuracy * 100)?.toFixed(2) || '-'}%</span>
+                </div>
+                <div class="d-flex justify-content-between">
+                    <span>Val Accuracy:</span>
+                    <span>${(metrics.val_accuracy * 100)?.toFixed(2) || '-'}%</span>
+                </div>
+            </div>
+            <div class="col-6 text-end">
+                <button class="btn btn-sm btn-success" 
+                    onclick="window.location.href='/test?model=${training.model_name}'">
+                    Test Model
+                </button>
+                <button class="btn btn-sm btn-outline-secondary mt-1" 
+                    onclick="window.location.href='/train/models/${training.model_name}/details'">
+                    Details
+                </button>
+            </div>
+        </div>`;
+    }
+    
+    function getFailedTrainingDetails(training) {
+        return `
+        <div class="alert alert-danger py-2 mb-0">
+            <small><strong>Error:</strong> ${training.error || 'Unknown error occurred'}</small>
+        </div>`;
+    }
+    
+    function getStatusClass(status) {
+        switch(status) {
+            case 'initializing':
+            case 'preparing':
+                return 'bg-info';
+            case 'training':
+                return 'bg-primary';
+            case 'saving':
+                return 'bg-warning text-dark';
+            case 'completed':
+                return 'bg-success';
+            case 'error':
+                return 'bg-danger';
+            default:
+                return 'bg-secondary';
+        }
+    }
+    
+    function getStageMessage(stage) {
+        switch(stage) {
+            case 'importing_libraries':
+                return 'Importing required libraries...';
+            case 'libraries_imported':
+                return 'Libraries imported successfully';
+            case 'loading_dataset':
+                return 'Loading and preparing dataset...';
+            case 'creating_dataloaders':
+                return 'Creating data loaders...';
+            case 'dataset_ready':
+                return 'Dataset prepared successfully';
+            case 'downloading_model':
+                return 'Downloading pre-trained model architecture...';
+            case 'creating_model':
+                return 'Creating model architecture...';
+            case 'model_ready':
+                return 'Model architecture ready';
+            case 'starting_training':
+                return 'Starting model training...';
+            case 'training_epoch':
+                return 'Training in progress...';
+            case 'epoch_complete':
+                return 'Epoch complete, continuing training...';
+            case 'training_complete':
+                return 'Training complete!';
+            case 'saving_model':
+                return 'Saving trained model...';
+            case 'saving_metadata':
+                return 'Saving model metadata...';
+            case 'exporting_model':
+                return 'Exporting model to file...';
+            case 'completed':
+                return 'Training completed successfully!';
+            default:
+                return 'Processing...';
+        }
+    }
+    
+    function showTrainingLoadError() {
+        const containers = ['activeTrainings', 'completedTrainings', 'failedTrainings'];
+        containers.forEach(container => {
+            const element = document.getElementById(container);
+            if (element) {
+                element.innerHTML = `
+                <div class="alert alert-danger mb-0">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    Failed to load training information. Please try refreshing.
+                </div>`;
+            }
+        });
+    }
+</script>
 {% endblock %} 

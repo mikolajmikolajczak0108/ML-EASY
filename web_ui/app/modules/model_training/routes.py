@@ -810,6 +810,94 @@ def train_model():
         }), 500
 
 
+@model_training_bp.route('/trainings/status')
+def trainings_status():
+    """Get status of all training tasks."""
+    try:
+        # Get directory containing training status files
+        status_dir = os.path.join(get_model_path(), 'training_status')
+        
+        if not os.path.exists(status_dir):
+            return jsonify({
+                'active': [],
+                'completed': [],
+                'failed': []
+            })
+            
+        # Get all status files
+        status_files = [f for f in os.listdir(status_dir) if f.endswith('.json')]
+        
+        # Categorize trainings
+        active_trainings = []
+        completed_trainings = []
+        failed_trainings = []
+        
+        # Current time for calculating duration
+        current_time = time.time()
+        
+        for status_file in status_files:
+            try:
+                # Get model name from filename
+                model_name = os.path.splitext(status_file)[0]
+                
+                # Read status file
+                with open(os.path.join(status_dir, status_file), 'r') as f:
+                    status = json.load(f)
+                    
+                # Add model name if not present
+                if 'model_name' not in status:
+                    status['model_name'] = model_name
+                    
+                # Calculate duration if possible
+                if 'started_at' in status:
+                    status['duration'] = int(current_time - float(status['started_at']))
+                
+                # Categorize based on status
+                if status.get('status') == 'completed':
+                    completed_trainings.append(status)
+                elif status.get('status') == 'error':
+                    failed_trainings.append(status)
+                else:
+                    # Check if active training is stale (no updates in 10 minutes)
+                    is_stale = False
+                    status_file_path = os.path.join(status_dir, status_file)
+                    last_modified = os.path.getmtime(status_file_path)
+                    
+                    if current_time - last_modified > 600:  # 10 minutes
+                        # Mark as stale and move to failed
+                        status['status'] = 'error'
+                        status['error'] = 'Training process appears to be stalled'
+                        status['error_type'] = 'stalled'
+                        failed_trainings.append(status)
+                    else:
+                        active_trainings.append(status)
+            except Exception as e:
+                logger.error(f"Error processing training status file {status_file}: {e}")
+                # Add to failed with error info
+                failed_trainings.append({
+                    'model_name': os.path.splitext(status_file)[0],
+                    'status': 'error',
+                    'error': f"Error reading status: {str(e)}"
+                })
+                
+        # Sort trainings: active by start time (recent first), completed by completion time
+        active_trainings.sort(key=lambda x: x.get('started_at', 0), reverse=True)
+        completed_trainings.sort(key=lambda x: x.get('completed_at', 0), reverse=True)
+        
+        return jsonify({
+            'active': active_trainings,
+            'completed': completed_trainings,
+            'failed': failed_trainings
+        })
+    except Exception as e:
+        logger.error(f"Error getting training statuses: {e}")
+        logger.error(traceback.format_exc())
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
 @model_training_bp.route('/models/<model_name>/status')
 def model_status(model_name):
     """Get the current status of a model's training."""
