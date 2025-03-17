@@ -2,23 +2,17 @@
 Utility functions for machine learning operations.
 """
 import os
-import torch
-from fastai.vision.all import (
-    load_learner, PILImage, ImageDataLoaders, vision_learner, 
-    error_rate, Resize, RandomResizedCrop, imagenet_stats, models, 
-    get_image_files, DataBlock, Categorize, CategoryBlock, ImageBlock
-)
-from flask import current_app
 import logging
-
+from flask import current_app
+# We'll import specific modules when needed to avoid unnecessary dependencies
 
 # Dictionary of available model architectures
 AVAILABLE_ARCHITECTURES = {
-    'resnet18': models.resnet18,
-    'resnet34': models.resnet34,
-    'resnet50': models.resnet50,
-    'mobilenet_v2': models.mobilenet_v2,
-    'densenet121': models.densenet121
+    'resnet18': 'models.resnet18',
+    'resnet34': 'models.resnet34',
+    'resnet50': 'models.resnet50',
+    'mobilenet_v2': 'models.mobilenet_v2',
+    'densenet121': 'models.densenet121'
 }
 
 # Dictionary of dataset URLs
@@ -159,27 +153,33 @@ def load_model(model_name):
     # Path to saved models
     models_dir = current_app.config['MODEL_PATH']
     saved_models_dir = os.path.join(models_dir, 'saved_models')
-    model_dir = os.path.join(saved_models_dir, model_name)
+    model_dir = os.path.normpath(os.path.join(saved_models_dir, model_name))
+    
+    logging.info(f"Attempting to load model: {model_name} from path: {model_dir}")
     
     # Check if model exists
     if not os.path.exists(model_dir):
         # Check common file extensions directly
-        h5_path = os.path.join(saved_models_dir, f"{model_name}.h5")
-        pkl_path = os.path.join(saved_models_dir, f"{model_name}.pkl")
-        export_path = os.path.join(saved_models_dir, f"{model_name}.export")
+        h5_path = os.path.normpath(os.path.join(saved_models_dir, f"{model_name}.h5"))
+        pkl_path = os.path.normpath(os.path.join(saved_models_dir, f"{model_name}.pkl"))
+        export_path = os.path.normpath(os.path.join(saved_models_dir, f"{model_name}.export"))
         
         if os.path.exists(h5_path):
             model_path = h5_path
+            logging.info(f"Found model at: {model_path}")
         elif os.path.exists(pkl_path):
             model_path = pkl_path
+            logging.info(f"Found model at: {model_path}")
         elif os.path.exists(export_path):
             model_path = export_path
+            logging.info(f"Found model at: {model_path}")
         else:
             logging.error(f"Model {model_name} not found in {saved_models_dir}")
             return None
     else:
         # Use the directory itself (for fastai models exported as directories)
         model_path = model_dir
+        logging.info(f"Found model directory at: {model_path}")
     
     # Try to detect model type based on file extension or directory structure
     if model_path.endswith('.h5'):
@@ -190,7 +190,9 @@ def load_model(model_name):
         try:
             import tensorflow as tf
             tensorflow_found = True
+            logging.info("TensorFlow detected via direct import")
         except ImportError:
+            logging.warning("Failed to import TensorFlow directly")
             pass
         
         # Method 2: Check with subprocess if direct import fails
@@ -203,13 +205,16 @@ def load_model(model_name):
                 )
                 if result.returncode == 0:
                     tensorflow_found = True
-            except Exception:
+                    logging.info("TensorFlow detected via subprocess check")
+            except Exception as e:
+                logging.warning(f"Failed to check TensorFlow via subprocess: {e}")
                 pass
         
         # If we found TensorFlow, load the model
         if tensorflow_found:
             try:
                 import tensorflow as tf
+                logging.info(f"Loading Keras model from: {model_path}")
                 model = tf.keras.models.load_model(model_path)
                 return model
             except Exception as e:
@@ -223,9 +228,29 @@ def load_model(model_name):
     
     # Default to fastai for other model types
     try:
-        from fastai.learner import load_learner
-        model = load_learner(model_path)
-        return model
+        # First try to check if we have read access
+        try:
+            if os.path.isdir(model_path):
+                os.listdir(model_path)  # Check if we can read the directory
+            else:
+                with open(model_path, 'rb') as f:
+                    pass  # Just check if we can open the file
+        except PermissionError as pe:
+            logging.error(f"Permission denied when accessing model path: {model_path}")
+            raise PermissionError(f"Cannot access model file/directory: {pe}")
+            
+        # Temporarily suppress the pickle warning
+        import warnings
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning, 
+                                   message="load_learner` uses Python's insecure pickle module")
+            from fastai.learner import load_learner
+            logging.info(f"Loading FastAI model from: {model_path}")
+            model = load_learner(model_path)
+            return model
+    except PermissionError as pe:
+        logging.error(f"Permission denied when loading model: {pe}")
+        return None
     except Exception as e:
         logging.error(f"Error loading fastai model: {e}")
         
@@ -234,8 +259,17 @@ def load_model(model_name):
             try:
                 export_path = os.path.join(model_path, 'export.pkl')
                 if os.path.exists(export_path):
-                    model = load_learner(export_path)
-                    return model
+                    logging.info(f"Trying to load model from export.pkl: {export_path}")
+                    # Temporarily suppress the pickle warning
+                    import warnings
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings("ignore", category=UserWarning, 
+                                            message="load_learner` uses Python's insecure pickle module")
+                        model = load_learner(export_path)
+                        return model
+            except PermissionError as pe:
+                logging.error(f"Permission denied when loading export.pkl: {pe}")
+                return None
             except Exception as e2:
                 logging.error(f"Error loading fastai model from export.pkl: {e2}")
         
