@@ -173,16 +173,17 @@ def load_model(model_name):
         
         # Check if model exists as a directory
         if os.path.exists(model_dir) and os.path.isdir(model_dir):
-            # Look for export.pkl or model.pkl in the directory
-            export_path = os.path.join(model_dir, 'export.pkl')
+            # Look for model.pkl first, then export.pkl as a fallback
             model_pkl_path = os.path.join(model_dir, 'model.pkl')
+            export_path = os.path.join(model_dir, 'export.pkl')
             
-            if os.path.exists(export_path):
-                model_path = export_path
-                logging.info(f"Found export.pkl at: {model_path}")
-            elif os.path.exists(model_pkl_path):
+            # Prioritize model.pkl
+            if os.path.exists(model_pkl_path):
                 model_path = model_pkl_path
                 logging.info(f"Found model.pkl at: {model_path}")
+            elif os.path.exists(export_path):
+                model_path = export_path
+                logging.info(f"Found export.pkl at: {model_path}")
             else:
                 # Check for any .pkl file
                 pkl_files = [f for f in os.listdir(model_dir) if f.endswith('.pkl')]

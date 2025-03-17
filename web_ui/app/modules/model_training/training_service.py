@@ -4,6 +4,7 @@ import json
 import logging
 import traceback
 import threading
+import pickle
 
 from .utils import get_model_path
 
@@ -105,13 +106,26 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
         with open(os.path.join(model_dir, 'metadata.json'), 'w') as f:
             json.dump(metadata, f, indent=4)
         
-        # Save a dummy model file to simulate the actual model
-        with open(os.path.join(model_dir, 'model.pkl'), 'w') as f:
-            f.write("This is a placeholder for the actual model file in pickle format")
+        # Save a proper pickled model file
+        # Create a simple model placeholder - in a real app this would be your trained model
+        dummy_model = {
+            'name': model_name,
+            'architecture': architecture,
+            'trained_on': dataset_name,
+            'epochs': epochs,
+            'batch_size': batch_size,
+            'learning_rate': learning_rate,
+            'accuracy': train_acc,
+            'loss': train_loss
+        }
+        
+        # Save as proper pickle file
+        with open(os.path.join(model_dir, 'model.pkl'), 'wb') as f:
+            pickle.dump(dummy_model, f)
         
         # Create an export.pkl file as well for fastai compatibility
-        with open(os.path.join(model_dir, 'export.pkl'), 'w') as f:
-            f.write("This is a placeholder for the fastai export.pkl file")
+        with open(os.path.join(model_dir, 'export.pkl'), 'wb') as f:
+            pickle.dump(dummy_model, f)
         
         # 5. Mark training as complete
         update_training_status(model_name, {
