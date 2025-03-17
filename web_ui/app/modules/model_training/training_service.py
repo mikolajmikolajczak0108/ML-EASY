@@ -277,19 +277,20 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
                 self.model_name = model_name
                 self.current_epoch = 0
                 self.total_epochs = epochs
-                self.training_start_time = time.time()
+                self.training_start_time = None
+                # Add name attribute for fastai compatibility
+                self.name = 'status_callback'
                 
             def before_fit(self):
                 self.training_start_time = time.time()
                 update_training_status(self.model_name, {
                     'status': 'training',
                     'progress': 65,
-                    'stage': 'before_training',
-                    'epoch': 0,
+                    'stage': 'starting_training',
+                    'epoch': 1,
                     'total_epochs': self.total_epochs,
-                    'message': 'Preparing to start training...',
-                    'metrics': {},
-                    'started_at': self.training_start_time
+                    'message': 'Starting model training...',
+                    'metrics': {}
                 })
                 
             def before_epoch(self):
@@ -487,19 +488,42 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
         return False
 
 
-def update_training_status(model_name, status):
-    """Update and persist the training status for a model."""
+def update_training_status(model_name, status_update):
+    """Update the training status for a model."""
     try:
-        # Create status directory if it doesn't exist
+        # Get path to status file
         status_dir = os.path.join(get_model_path(), 'training_status')
         os.makedirs(status_dir, exist_ok=True)
-        
-        # Write status to file
         status_file = os.path.join(status_dir, f"{model_name}.json")
-        with open(status_file, 'w') as f:
-            json.dump(status, f)
+        
+        # If file exists, read and update
+        if os.path.exists(status_file):
+            with open(status_file, 'r') as f:
+                status = json.load(f)
+        else:
+            # Create new status
+            status = {
+                'model_name': model_name,
+                'started_at': str(time.time()),
+                'status': 'initializing',
+                'progress': 0
+            }
+        
+        # Update status with new values
+        status.update(status_update)
+        
+        # Convert to JSON-serializable format
+        safe_status = safe_json_status(status)
+        
+        # If training completed, add completion time
+        if status_update.get('status') == 'completed':
+            safe_status['completed_at'] = str(time.time())
             
-        logger.debug(f"Updated training status for {model_name}: {status['status']}")
+        # Write updated status to file
+        with open(status_file, 'w') as f:
+            json.dump(safe_status, f, indent=2)
+            
+        logger.debug(f"Updated training status for {model_name}: {status_update.get('status')}")
     except Exception as e:
         logger.error(f"Error updating training status: {e}")
 
@@ -615,4 +639,27 @@ def get_model_metadata(model_name):
     except Exception as e:
         logger.error(f"Error getting model metadata: {e}")
         logger.error(traceback.format_exc())
-        return None 
+        return None
+
+
+# Helper to safely convert class information to JSON-serializable format
+def safe_json_status(status_dict):
+    """Convert status dictionary to JSON-serializable format."""
+    try:
+        # Make a copy to avoid modifying the original
+        status = status_dict.copy()
+        
+        # Handle classes data which might contain CategoryMap objects
+        if 'classes' in status and hasattr(status['classes'], 'items'):
+            # Convert CategoryMap to simple list
+            status['classes'] = list(status['classes'])
+            
+        # Handle any other potentially non-serializable objects
+        return status
+    except Exception as e:
+        logger.error(f"Error preparing status for JSON: {e}")
+        # Return a simplified version that will definitely serialize
+        return {
+            'status': status_dict.get('status', 'error'),
+            'message': status_dict.get('message', 'Error preparing status')
+        } 
