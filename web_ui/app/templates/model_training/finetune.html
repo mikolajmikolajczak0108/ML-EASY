@@ -38,7 +38,7 @@
                     <select class="form-select" id="dataset" name="dataset" required>
                         <option value="" selected disabled>Choose a dataset</option>
                         {% for dataset in datasets %}
-                        <option value="{{ dataset }}">{{ dataset }}</option>
+                        <option value="{{ dataset.name if dataset is mapping else dataset }}">{{ dataset.name if dataset is mapping else dataset }}</option>
                         {% endfor %}
                     </select>
                     <div class="form-text">
