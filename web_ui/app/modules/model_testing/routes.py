@@ -2,8 +2,6 @@
 Routes for the model testing module.
 """
 import os
-import cv2
-import numpy as np
 import time
 import sys
 import subprocess
@@ -11,13 +9,12 @@ import threading
 import queue
 import json
 from flask import (
-    Blueprint, render_template, request, jsonify, 
-    current_app, redirect, url_for, Response
+    Blueprint, render_template, request, jsonify, Response
 )
 from werkzeug.utils import secure_filename
 
 from app.utils.file_helpers import (
-    allowed_file, is_video_file, save_uploaded_file, queue_file_upload
+    allowed_file, is_video_file, save_uploaded_file
 )
 from app.utils.ml_helpers import (
     load_model, get_available_models
@@ -49,47 +46,106 @@ def install_tensorflow_thread():
         # Update status
         installation_status = {
             'status': 'installing',
-            'progress': 10,
-            'message': 'Installing TensorFlow and dependencies...',
+            'progress': 5,
+            'message': 'Checking current Python environment...',
             'success': False,
             'error': ''
         }
         installation_queue.put(installation_status.copy())
+        time.sleep(1)
         
-        # Execute pip install command
-        process = subprocess.Popen(
-            [sys.executable, "-m", "pip", "install", "tensorflow", "numpy", "h5py"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
-        )
-        
-        # Update progress periodically
-        for i in range(5):
-            installation_status['progress'] = 10 + (i * 15)
-            installation_status['message'] = f'Installing TensorFlow... (this may take a few minutes)'
-            installation_queue.put(installation_status.copy())
-            time.sleep(5)  # Sleep to simulate progress
-        
-        # Get the command output
-        stdout, stderr = process.communicate()
-        
-        # Check if installation was successful
-        if process.returncode == 0:
+        # First check if TensorFlow is already installed
+        try:
+            import tensorflow as tf
             installation_status = {
                 'status': 'completed',
                 'progress': 100,
-                'message': 'TensorFlow successfully installed!',
+                'message': f'TensorFlow {tf.__version__} is already installed!',
                 'success': True,
                 'error': ''
             }
+            installation_queue.put(installation_status.copy())
+            return
+        except ImportError:
+            pass
+        
+        # Update status
+        installation_status = {
+            'status': 'installing',
+            'progress': 10,
+            'message': 'Starting TensorFlow installation...',
+            'success': False,
+            'error': ''
+        }
+        installation_queue.put(installation_status.copy())
+        time.sleep(1)
+        
+        # Execute pip install command with real-time output
+        process = subprocess.Popen(
+            [sys.executable, "-m", "pip", "install", "tensorflow", "numpy", "h5py"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            universal_newlines=True
+        )
+        
+        # Track installation progress
+        progress_markers = {
+            "Collecting": 15,
+            "Downloading": 25,
+            "Installing": 70,
+            "Successfully installed": 95
+        }
+        
+        # Read output line by line
+        current_progress = 10
+        for line in iter(process.stdout.readline, ''):
+            # Update progress based on output
+            line = line.strip()
+            if line:
+                for marker, progress in progress_markers.items():
+                    if marker in line:
+                        current_progress = max(current_progress, progress)
+                        break
+                
+                installation_status = {
+                    'status': 'installing',
+                    'progress': current_progress,
+                    'message': line,
+                    'success': False,
+                    'error': ''
+                }
+                installation_queue.put(installation_status.copy())
+        
+        # Check if installation was successful
+        process.wait()
+        if process.returncode == 0:
+            # Verify TensorFlow is now importable
+            try:
+                import tensorflow as tf
+                installation_status = {
+                    'status': 'completed',
+                    'progress': 100,
+                    'message': f'TensorFlow {tf.__version__} successfully installed!',
+                    'success': True,
+                    'error': ''
+                }
+            except ImportError:
+                installation_status = {
+                    'status': 'completed',
+                    'progress': 100,
+                    'message': 'Installation reported success, but TensorFlow cannot be imported. You may need to restart the application.',
+                    'success': True,
+                    'error': ''
+                }
         else:
             installation_status = {
                 'status': 'completed',
                 'progress': 100,
                 'message': 'Failed to install TensorFlow',
                 'success': False,
-                'error': stderr
+                'error': 'Installation process failed. Try installing manually with: pip install tensorflow'
             }
     except Exception as e:
         installation_status = {
@@ -161,14 +217,57 @@ def install_status():
 def check_tensorflow():
     """Check if TensorFlow is installed"""
     try:
-        import tensorflow
+        # Try multiple ways to detect TensorFlow
+        tf_installed = False
+        tf_version = "Unknown"
+        
+        # Method 1: Direct import
+        try:
+            import tensorflow as tf
+            tf_installed = True
+            tf_version = tf.__version__
+            return jsonify({
+                'installed': True,
+                'version': tf_version
+            })
+        except ImportError:
+            pass
+            
+        # Method 2: Check using subprocess
+        try:
+            result = subprocess.run([sys.executable, "-c", "import tensorflow; print(tensorflow.__version__)"], 
+                                   capture_output=True, text=True, check=False)
+            if result.returncode == 0:
+                tf_installed = True
+                tf_version = result.stdout.strip()
+                return jsonify({
+                    'installed': True,
+                    'version': tf_version
+                })
+        except Exception:
+            pass
+            
+        # Method 3: Check installed packages via pip
+        try:
+            result = subprocess.run([sys.executable, "-m", "pip", "list"], 
+                                   capture_output=True, text=True, check=False)
+            if "tensorflow" in result.stdout.lower():
+                tf_installed = True
+                return jsonify({
+                    'installed': True,
+                    'version': "Found in pip list"
+                })
+        except Exception:
+            pass
+        
         return jsonify({
-            'installed': True,
-            'version': tensorflow.__version__
+            'installed': tf_installed,
+            'version': tf_version
         })
-    except ImportError:
+    except Exception as e:
         return jsonify({
-            'installed': False
+            'installed': False,
+            'error': str(e)
         })
 
 

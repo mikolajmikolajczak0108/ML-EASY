@@ -9,6 +9,7 @@ from fastai.vision.all import (
     get_image_files, DataBlock, Categorize, CategoryBlock, ImageBlock
 )
 from flask import current_app
+import logging
 
 
 # Dictionary of available model architectures
@@ -147,104 +148,97 @@ def get_available_datasets():
 
 def load_model(model_name):
     """
-    Load a trained model.
+    Load a saved model by name
     
     Args:
-        model_name: Name of the model (directory or file without extension)
+        model_name (str): Name of the model
         
     Returns:
-        model: Loaded model or None if loading fails
+        fastai.Learner or keras.Model: Loaded model
     """
-    base_models_path = current_app.config['MODEL_PATH']
+    # Path to saved models
+    models_dir = current_app.config['MODEL_PATH']
+    saved_models_dir = os.path.join(models_dir, 'saved_models')
+    model_dir = os.path.join(saved_models_dir, model_name)
     
-    try:
-        # First, check if TensorFlow is available for .h5 models
-        has_tensorflow = False
+    # Check if model exists
+    if not os.path.exists(model_dir):
+        # Check common file extensions directly
+        h5_path = os.path.join(saved_models_dir, f"{model_name}.h5")
+        pkl_path = os.path.join(saved_models_dir, f"{model_name}.pkl")
+        export_path = os.path.join(saved_models_dir, f"{model_name}.export")
+        
+        if os.path.exists(h5_path):
+            model_path = h5_path
+        elif os.path.exists(pkl_path):
+            model_path = pkl_path
+        elif os.path.exists(export_path):
+            model_path = export_path
+        else:
+            logging.error(f"Model {model_name} not found in {saved_models_dir}")
+            return None
+    else:
+        # Use the directory itself (for fastai models exported as directories)
+        model_path = model_dir
+    
+    # Try to detect model type based on file extension or directory structure
+    if model_path.endswith('.h5'):
+        # Try multiple methods to detect TensorFlow
+        tensorflow_found = False
+        
+        # Method 1: Direct import
         try:
-            import tensorflow
-            has_tensorflow = True
+            import tensorflow as tf
+            tensorflow_found = True
         except ImportError:
-            print("Warning: TensorFlow not installed. Cannot load .h5 models.")
+            pass
         
-        # Check possible locations for this model
+        # Method 2: Check with subprocess if direct import fails
+        if not tensorflow_found:
+            try:
+                import subprocess, sys
+                result = subprocess.run(
+                    [sys.executable, "-c", "import tensorflow"], 
+                    capture_output=True, text=True, check=False
+                )
+                if result.returncode == 0:
+                    tensorflow_found = True
+            except Exception:
+                pass
         
-        # 1. Check if it's a .pkl file in the base models directory
-        model_file = os.path.join(base_models_path, f"{model_name}.pkl")
-        if os.path.exists(model_file) and os.path.isfile(model_file):
-            return load_learner(model_file)
-            
-        # 2. Check if it's a .h5 file in the base models directory
-        model_file = os.path.join(base_models_path, f"{model_name}.h5")
-        if os.path.exists(model_file) and os.path.isfile(model_file):
-            if has_tensorflow:
-                from tensorflow.keras.models import load_model as keras_load_model
-                return keras_load_model(model_file)
-            else:
-                raise ImportError("TensorFlow required to load .h5 models. Please install TensorFlow first.")
-                
-        # 3. Check if it's a subdirectory of base_models_path
-        model_dir = os.path.join(base_models_path, model_name)
-        if os.path.exists(model_dir) and os.path.isdir(model_dir):
-            # Look for model files in the directory
-            # Start with .pkl files
-            for file in os.listdir(model_dir):
-                if file.endswith('.pkl'):
-                    return load_learner(os.path.join(model_dir, file))
-                    
-            # Then check for .h5 files
-            for file in os.listdir(model_dir):
-                if file.endswith('.h5'):
-                    if has_tensorflow:
-                        from tensorflow.keras.models import load_model as keras_load_model
-                        return keras_load_model(os.path.join(model_dir, file))
-                    else:
-                        raise ImportError("TensorFlow required to load .h5 models. Please install TensorFlow first.")
-        
-        # 4. Check in the saved_models subdirectory
-        saved_models_dir = os.path.join(base_models_path, 'saved_models', model_name)
-        if os.path.exists(saved_models_dir) and os.path.isdir(saved_models_dir):
-            # Try different file formats in order
-            
-            # First look for export.pkl (fastai format)
-            model_file = os.path.join(saved_models_dir, 'export.pkl')
-            if os.path.exists(model_file):
-                return load_learner(model_file)
-                
-            # Then look for model.pkl (fastai format)
-            model_file = os.path.join(saved_models_dir, 'model.pkl')
-            if os.path.exists(model_file):
-                return load_learner(model_file)
-                
-            # Then look for model.h5 (Keras/TensorFlow format)
-            model_file = os.path.join(saved_models_dir, 'model.h5')
-            if os.path.exists(model_file):
-                if has_tensorflow:
-                    from tensorflow.keras.models import load_model as keras_load_model
-                    return keras_load_model(model_file)
-                else:
-                    raise ImportError("TensorFlow required to load .h5 models. Please install TensorFlow first.")
-            
-            # Check for any .h5 file
-            h5_files = [f for f in os.listdir(saved_models_dir) if f.endswith('.h5')]
-            if h5_files:
-                if has_tensorflow:
-                    from tensorflow.keras.models import load_model as keras_load_model
-                    return keras_load_model(os.path.join(saved_models_dir, h5_files[0]))
-                else:
-                    raise ImportError("TensorFlow required to load .h5 models. Please install TensorFlow first.")
-                    
-            # Check for any .pkl file
-            pkl_files = [f for f in os.listdir(saved_models_dir) if f.endswith('.pkl')]
-            if pkl_files:
-                return load_learner(os.path.join(saved_models_dir, pkl_files[0]))
-                
-        # Model not found in any location
-        raise FileNotFoundError(f"Model '{model_name}' not found in any location")
+        # If we found TensorFlow, load the model
+        if tensorflow_found:
+            try:
+                import tensorflow as tf
+                model = tf.keras.models.load_model(model_path)
+                return model
+            except Exception as e:
+                logging.error(f"Error loading Keras model: {e}")
+                return None
+        else:
+            # TensorFlow not available
+            error_msg = "TensorFlow required to load .h5 models. Please install TensorFlow first."
+            logging.error(f"Error loading model {model_name}: {error_msg}")
+            raise ImportError(error_msg)
+    
+    # Default to fastai for other model types
+    try:
+        from fastai.learner import load_learner
+        model = load_learner(model_path)
+        return model
     except Exception as e:
-        # Add proper error handling with contextual information
-        import traceback
-        print(f"Error loading model {model_name}: {str(e)}")
-        print(traceback.format_exc())
+        logging.error(f"Error loading fastai model: {e}")
+        
+        # Try one last method - if it's a directory, look for an export.pkl file inside
+        if os.path.isdir(model_path):
+            try:
+                export_path = os.path.join(model_path, 'export.pkl')
+                if os.path.exists(export_path):
+                    model = load_learner(export_path)
+                    return model
+            except Exception as e2:
+                logging.error(f"Error loading fastai model from export.pkl: {e2}")
+        
         return None
 
 
