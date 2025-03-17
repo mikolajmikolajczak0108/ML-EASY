@@ -5,8 +5,10 @@ import logging
 import traceback
 import threading
 import pickle
+import random
+from pathlib import Path
 
-from .utils import get_model_path
+from .utils import get_model_path, get_dataset_path
 
 # Initialize logger
 logger = logging.getLogger(__name__)
@@ -14,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 def train_model_task(model_name, dataset_name, architecture, epochs, batch_size, 
                     learning_rate, data_augmentation):
-    """Background task to train a machine learning model."""
+    """Background task to train a machine learning model with fastai/PyTorch."""
     try:
         # Extract dataset name if it's in dictionary format
         if isinstance(dataset_name, dict) and 'name' in dataset_name:
@@ -23,63 +25,150 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
             
         logger.info(f"Started training model: {model_name} with dataset: {dataset_name}")
         
-        # Simulate training steps with appropriate logging
+        # Import fastai/torch here to avoid blocking the main thread during import
+        import torch
+        import torch.nn as nn
+        import torch.optim as optim
+        from torch.utils.data import DataLoader, random_split
+        import torchvision.transforms as transforms
+        import torchvision.models as models
+        from torchvision.datasets import ImageFolder
+        from fastai.vision.all import (
+            ImageDataLoaders, 
+            Resize, 
+            vision_learner, 
+            error_rate, 
+            accuracy,
+            RandomResizedCrop
+        )
+        from fastai.metrics import Precision, Recall, F1Score
+        
         # 1. Prepare dataset
         logger.info(f"Preparing dataset: {dataset_name}")
-        time.sleep(2)  # Simulate dataset preparation
+        dataset_path = os.path.join(get_dataset_path(), dataset_name)
+        
+        # Set up augmentations based on user selection
+        if data_augmentation:
+            tfms = [
+                Resize(224),
+                RandomResizedCrop(224, min_scale=0.8)
+            ]
+        else:
+            tfms = [Resize(224)]
+        
+        # Create fastai DataLoaders
+        try:
+            # Path object is needed for fastai
+            path = Path(dataset_path)
+            
+            # Create fastai DataLoaders
+            dls = ImageDataLoaders.from_folder(
+                path,
+                valid_pct=0.2,                   # 20% validation split
+                item_tfms=tfms,                  # Transformations applied to each item
+                batch_size=batch_size,
+                seed=42                          # For reproducibility
+            )
+            
+            # Get class names
+            class_names = dls.vocab
+            num_classes = len(class_names)
+            
+            logger.info(f"Successfully loaded dataset with {num_classes} classes: {class_names}")
+            logger.info(f"Training batches: {len(dls.train)}, Validation batches: {len(dls.valid)}")
+            
+        except Exception as e:
+            logger.error(f"Error creating DataLoaders: {e}")
+            logger.error(traceback.format_exc())
+            raise
         
         # 2. Create model architecture
         logger.info(f"Building model architecture: {architecture}")
-        time.sleep(3)  # Simulate model building
+        
+        # Map architecture string to fastai model
+        if architecture == "ResNet50":
+            model_arch = models.resnet50
+        elif architecture == "MobileNetV2":
+            model_arch = models.mobilenet_v2
+        elif architecture == "EfficientNetB0":
+            # Manual implementation required as fastai doesn't include EfficientNet directly
+            model_arch = models.efficientnet_b0
+        elif architecture == "VGG16":
+            model_arch = models.vgg16
+        elif architecture == "InceptionV3":
+            model_arch = models.inception_v3
+        elif architecture == "DenseNet121":
+            model_arch = models.densenet121
+        else:
+            # Default to ResNet34 if architecture not recognized
+            logger.warning(f"Architecture {architecture} not recognized, using ResNet34")
+            model_arch = models.resnet34
+            architecture = "ResNet34"
+        
+        # Create fastai learner
+        learn = vision_learner(
+            dls, 
+            model_arch, 
+            metrics=[accuracy, error_rate, Precision(), Recall(), F1Score()],
+            lr=learning_rate
+        )
         
         # 3. Training loop with progress updates
         logger.info(f"Starting training for {epochs} epochs with batch size {batch_size}")
-        for epoch in range(1, epochs + 1):
-            # Simulate training for this epoch
-            logger.info(f"Epoch {epoch}/{epochs}")
-            
-            # Simulate batch processing
-            num_batches = 10  # Just for simulation
-            for batch in range(1, num_batches + 1):
-                # Simulate batch training
-                time.sleep(0.5)  # Shorter sleep time for faster simulation
+        
+        # Custom callback to update training status
+        class StatusCallback():
+            def __init__(self, model_name):
+                self.model_name = model_name
                 
-                # Calculate simulated metrics
-                train_loss = 0.5 / (epoch + batch / num_batches)
-                train_acc = min(0.5 + (epoch + batch / num_batches) / (epochs * 1.5), 0.99)
+            def before_fit(self):
+                update_training_status(self.model_name, {
+                    'status': 'training',
+                    'progress': 0,
+                    'epoch': 0,
+                    'metrics': {}
+                })
+                
+            def after_epoch(self):
+                # Get current epoch metrics
+                epoch = learn.epoch
+                train_loss = float(learn.recorder.losses[-1])
+                valid_loss = float(learn.recorder.values[-1][0])
+                accuracy_val = float(learn.recorder.values[-1][1])
+                error_rate_val = float(learn.recorder.values[-1][2])
+                
+                # Calculate progress percentage
+                progress = ((epoch) / epochs) * 100
                 
                 # Update training status
-                update_training_status(model_name, {
+                update_training_status(self.model_name, {
                     'status': 'training',
-                    'progress': (epoch - 1 + batch / num_batches) / epochs * 100,
+                    'progress': progress,
                     'epoch': epoch,
-                    'batch': batch,
                     'metrics': {
                         'loss': train_loss,
-                        'accuracy': train_acc
+                        'accuracy': accuracy_val,
+                        'val_loss': valid_loss,
+                        'val_accuracy': 1 - error_rate_val  # Convert error to accuracy
                     }
                 })
-            
-            # Simulate validation after each epoch
-            val_loss = 0.6 / (epoch + 0.5)
-            val_acc = min(0.4 + epoch / (epochs * 1.2), 0.95)
-            
-            # Update training status with validation results
-            update_training_status(model_name, {
-                'status': 'validating',
-                'progress': epoch / epochs * 100,
-                'epoch': epoch,
-                'metrics': {
-                    'loss': train_loss,
-                    'accuracy': train_acc,
-                    'val_loss': val_loss,
-                    'val_accuracy': val_acc
-                }
-            })
+                logger.info(f"Epoch {epoch}/{epochs} complete. Loss: {train_loss:.4f}, Accuracy: {accuracy_val:.4f}")
+        
+        # Register our custom callback
+        status_cb = StatusCallback(model_name)
+        learn.add_cb(status_cb)
+        
+        # Train the model
+        learn.fine_tune(epochs, freeze_epochs=1)
+        
+        # Get final metrics from the recorder
+        final_train_loss = float(learn.recorder.losses[-1])
+        final_valid_loss = float(learn.recorder.values[-1][0])
+        final_accuracy = float(learn.recorder.values[-1][1])
+        final_error_rate = float(learn.recorder.values[-1][2])
         
         # 4. Save model
         logger.info(f"Saving trained model: {model_name}")
-        time.sleep(2)  # Simulate model saving
         
         # Create model directory
         model_dir = os.path.join(get_model_path(), 'saved_models', model_name)
@@ -95,61 +184,38 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
             'learning_rate': learning_rate,
             'data_augmentation': data_augmentation,
             'date_created': time.strftime('%Y-%m-%d %H:%M:%S'),
+            'num_classes': num_classes,
+            'class_names': class_names,
             'final_metrics': {
-                'loss': train_loss,
-                'accuracy': train_acc,
-                'val_loss': val_loss,
-                'val_accuracy': val_acc
+                'loss': final_train_loss,
+                'accuracy': final_accuracy,
+                'val_loss': final_valid_loss,
+                'val_accuracy': 1 - final_error_rate
             }
         }
         
         with open(os.path.join(model_dir, 'metadata.json'), 'w') as f:
             json.dump(metadata, f, indent=4)
         
-        # Save a proper pickled model file
-        # Create a more robust model placeholder with sufficient data to pass validation
-        dummy_model = {
-            'name': model_name,
-            'architecture': architecture,
-            'trained_on': dataset_name,
-            'epochs': epochs,
-            'batch_size': batch_size,
-            'learning_rate': learning_rate,
-            'accuracy': train_acc,
-            'loss': train_loss,
-            'val_accuracy': val_acc,
-            'val_loss': val_loss,
-            # Add dummy weights to simulate a real model and ensure file size is sufficient
-            'weights': {
-                'layer1': [0.01] * 5000,  # Add sufficient data to make file larger
-                'layer2': [0.02] * 5000,
-                'layer3': [0.03] * 5000,
-                'dense': [0.04] * 1000,
-                'output': [0.05] * 500
-            },
-            'classes': ['class_' + str(i) for i in range(10)],  # Dummy class names
-            'date_created': time.strftime('%Y-%m-%d %H:%M:%S'),
-            'version': '1.0.0',
-            'framework': 'PyTorch' if 'ResNet' in architecture else 'TensorFlow'
-        }
+        # Save fastai model - this creates a proper pickle file
+        model_pkl_path = os.path.join(model_dir, 'model.pkl')
+        learn.export(model_pkl_path)
+        logger.info(f"Saved fastai model to: {model_pkl_path}")
         
-        # Save as proper pickle file with protocol 4 for better compatibility
-        with open(os.path.join(model_dir, 'model.pkl'), 'wb') as f:
-            pickle.dump(dummy_model, f, protocol=4)
-        
-        # Create an export.pkl file as well for fastai compatibility
-        with open(os.path.join(model_dir, 'export.pkl'), 'wb') as f:
-            pickle.dump(dummy_model, f, protocol=4)
+        # Also export to export.pkl for maximum compatibility
+        export_pkl_path = os.path.join(model_dir, 'export.pkl')
+        learn.export(export_pkl_path)
+        logger.info(f"Saved fastai export model to: {export_pkl_path}")
         
         # 5. Mark training as complete
         update_training_status(model_name, {
             'status': 'completed',
             'progress': 100,
             'metrics': {
-                'loss': train_loss,
-                'accuracy': train_acc,
-                'val_loss': val_loss,
-                'val_accuracy': val_acc
+                'loss': final_train_loss,
+                'accuracy': final_accuracy,
+                'val_loss': final_valid_loss,
+                'val_accuracy': 1 - final_error_rate
             }
         })
         
@@ -222,7 +288,7 @@ def start_model_training(model_name, dataset_name, architecture, epochs, batch_s
         training_thread = threading.Thread(
             target=train_model_task,
             args=(model_name, dataset_name, architecture, epochs, 
-                 batch_size, learning_rate, data_augmentation)
+                  batch_size, learning_rate, data_augmentation)
         )
         training_thread.daemon = True
         training_thread.start()
@@ -255,10 +321,6 @@ def get_models():
                             if item not in models:
                                 models.append(item)
                                 break
-                        elif file.endswith('.h5') and item not in models:
-                            # Only add H5 models if no PKL files found
-                            models.append(item)
-                            break
         
         # Also check the saved_models subdirectory
         saved_models_path = os.path.join(base_models_path, 'saved_models')
@@ -270,15 +332,11 @@ def get_models():
                 if os.path.isdir(item_path):
                     # Check if the directory contains model files
                     has_model_file = False
-                    has_pkl_file = False
                     
                     for file in os.listdir(item_path):
                         if file.endswith('.pkl') or file == 'export.pkl':
                             has_model_file = True
-                            has_pkl_file = True
                             break
-                        elif file.endswith('.h5'):
-                            has_model_file = True
                         elif file == 'metadata.json':
                             has_model_file = True
                             

@@ -153,7 +153,7 @@ def load_model(model_name):
         model_name (str): Name of the model
         
     Returns:
-        fastai.Learner: Loaded model
+        object: Loaded model (fastai Learner or dict)
     """
     # Import here to avoid triggering Flask auto-reload
     # when PyTorch loads many internal modules
@@ -221,9 +221,9 @@ def load_model(model_name):
                     logging.warning("Model file has unusual header but will attempt to load it")
         except Exception as e:
             logging.error(f"Error validating model file: {e}")
-            # Continue loading despite validation errors - we'll let the actual loading attempt determine if it works
+            # Continue loading despite validation errors
         
-        # Load the model using fastai
+        # Load the model - try different methods
         try:
             # First try to check if we have read access
             try:
@@ -236,83 +236,57 @@ def load_model(model_name):
                 logging.error(f"Permission denied when accessing model path: {model_path}")
                 raise PermissionError(f"Cannot access model file/directory: {pe}")
                 
-            # Try to load the model as a pickle file first
-            try:
-                with open(model_path, 'rb') as f:
-                    import pickle
-                    model = pickle.load(f)
-                logging.info(f"Successfully loaded model from pickle file: {model_path}")
-                return model
-            except Exception as pickle_error:
-                logging.warning(f"Couldn't load as regular pickle file: {pickle_error}")
-                # Fallback to fastai loader if pickle loading fails
-                
-            # Temporarily suppress the pickle warning
+            # Try to load the model as a fastai model first
             import warnings
             with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", category=UserWarning, 
-                                       message="load_learner` uses Python's insecure pickle module")
-                
-                # Load the model quietly to avoid triggering Flask watchdog
-                from fastai.learner import load_learner
-                logging.info(f"Loading FastAI model from: {model_path}")
-                
+                warnings.filterwarnings("ignore", category=UserWarning)
                 try:
-                    # Use a timeout to prevent hanging on corrupted files
-                    import signal
-                    
-                    def timeout_handler(signum, frame):
-                        raise TimeoutError("Model loading timed out")
-                    
-                    # Set timeout for model loading (5 seconds)
-                    if sys.platform != 'win32':  # signal.SIGALRM not available on Windows
-                        signal.signal(signal.SIGALRM, timeout_handler)
-                        signal.alarm(5)
-                    
-                    try:
-                        from fastai.learner import load_learner
-                        model = load_learner(model_path)
-                        logging.info("Successfully loaded model with fastai")
-                    except ImportError:
-                        logging.warning("Couldn't import fastai, trying alternative loading methods")
-                        # Try to load H5 format if the file ends with .h5
-                        if model_path.endswith('.h5'):
-                            try:
-                                import tensorflow as tf
-                                model = tf.keras.models.load_model(model_path)
-                                logging.info("Successfully loaded H5 model with TensorFlow")
-                            except ImportError:
-                                logging.warning("Couldn't import TensorFlow for H5 loading")
-                                # Create a dummy model that won't cause errors
-                                model = {"type": "dummy_model", "note": "This is a placeholder for a model that couldn't be loaded"}
-                        else:
-                            # Create a dummy model that won't cause errors
-                            model = {"type": "dummy_model", "note": "This is a placeholder for a model that couldn't be loaded"}
-                    
-                    # Cancel the alarm if loading succeeded
-                    if sys.platform != 'win32':
-                        signal.alarm(0)
-                    
-                    return model
-                except TimeoutError:
-                    logging.error("Model loading timed out - possible file corruption")
-                    # Return a dummy model instead of None
-                    return {"type": "error_model", "error": "Model loading timed out"}
-                except EOFError:
-                    logging.error("EOFError: Pickle file is truncated or corrupted")
-                    # Return a dummy model instead of None
-                    return {"type": "error_model", "error": "Pickle file is truncated"}
+                    # Import fastai at function call time to avoid dependencies
+                    from fastai.learner import load_learner
+                    learner = load_learner(model_path)
+                    logging.info(f"Successfully loaded fastai model: {model_path}")
+                    return learner
+                except ImportError:
+                    logging.warning("fastai not installed, trying to load as pickle")
                 except Exception as e:
-                    logging.error(f"Error loading model: {e}")
-                    # Return a dummy model instead of None
-                    return {"type": "error_model", "error": str(e)}
+                    logging.warning(f"Could not load as fastai model: {e}")
+            
+            # Try to load as plain pickle
+            try:
+                import pickle
+                with open(model_path, 'rb') as f:
+                    model = pickle.load(f)
+                logging.info(f"Successfully loaded pickle model: {model_path}")
+                return model
+            except Exception as e:
+                logging.error(f"Failed to load model: {e}")
                 
-        except PermissionError as pe:
-            logging.error(f"Permission denied when loading model: {pe}")
-            return None
-        except Exception as e:
-            logging.error(f"Error loading fastai model: {e}")
-            return None
+                # Try to load metadata as fallback
+                metadata_path = os.path.join(model_dir, 'metadata.json')
+                if os.path.exists(metadata_path):
+                    try:
+                        with open(metadata_path, 'r') as f:
+                            metadata = json.load(f)
+                        logging.info(f"Loaded metadata for model {model_name}")
+                        return {
+                            'type': 'metadata_only',
+                            'metadata': metadata
+                        }
+                    except Exception as json_err:
+                        logging.error(f"Error loading metadata: {json_err}")
+                
+                # Return error model as last resort
+                return {
+                    'type': 'error_model',
+                    'error': str(e)
+                }
+                
+        except Exception as outer_e:
+            logging.error(f"Error in model loading outer block: {outer_e}")
+            return {
+                'type': 'error_model',
+                'error': str(outer_e)
+            }
     finally:
         # Restore stdout and stderr
         sys.stdout = old_stdout
