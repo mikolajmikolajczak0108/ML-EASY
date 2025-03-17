@@ -82,7 +82,7 @@ def get_available_datasets():
 
 def load_model(model_name):
     """
-    Load a trained fastai model.
+    Load a trained model.
     
     Args:
         model_name: Name of the model directory
@@ -96,15 +96,44 @@ def load_model(model_name):
     try:
         # Check if the model directory exists
         if os.path.exists(model_dir) and os.path.isdir(model_dir):
-            # Look for export.pkl inside the model directory
+            # Try different file formats in order
+            
+            # 1. Look for export.pkl (fastai format)
             model_file = os.path.join(model_dir, 'export.pkl')
             if os.path.exists(model_file):
                 return load_learner(model_file)
-            else:
-                # If export.pkl doesn't exist, try model.pkl
-                model_file = os.path.join(model_dir, 'model.pkl')
-                if os.path.exists(model_file):
-                    return load_learner(model_file)
+                
+            # 2. Look for model.pkl (fastai format)
+            model_file = os.path.join(model_dir, 'model.pkl')
+            if os.path.exists(model_file):
+                return load_learner(model_file)
+                
+            # 3. Look for model.h5 (Keras/TensorFlow format)
+            model_file = os.path.join(model_dir, 'model.h5')
+            if os.path.exists(model_file):
+                # Need to use Keras/TensorFlow loader
+                try:
+                    from tensorflow.keras.models import load_model as keras_load_model
+                    return keras_load_model(model_file)
+                except ImportError:
+                    print("TensorFlow not installed - cannot load .h5 model")
+                    return None
+            
+            # 4. Check for any .h5 file
+            h5_files = [f for f in os.listdir(model_dir) if f.endswith('.h5')]
+            if h5_files:
+                try:
+                    from tensorflow.keras.models import load_model as keras_load_model
+                    return keras_load_model(os.path.join(model_dir, h5_files[0]))
+                except ImportError:
+                    print("TensorFlow not installed - cannot load .h5 model")
+                    return None
+                    
+            # 5. Check for any .pkl file
+            pkl_files = [f for f in os.listdir(model_dir) if f.endswith('.pkl')]
+            if pkl_files:
+                return load_learner(os.path.join(model_dir, pkl_files[0]))
+                
         return None
     except Exception as e:
         # Add logging for debugging
