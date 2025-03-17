@@ -721,17 +721,17 @@ def delete_dataset_route(dataset_name):
 
 @model_training_bp.route('/models/train', methods=['POST'])
 def train_model():
-    """Handle model training request."""
+    """Start training a model with the specified parameters."""
     try:
+        logger.info("Received request to train model")
+        
         # Get form data
-        model_name = request.form.get('model_name')
-        dataset_name = request.form.get('dataset')
-        architecture = request.form.get('architecture')
+        model_name = request.form.get('model_name', '')
+        dataset_name = request.form.get('dataset', '')
+        architecture = request.form.get('architecture', '')
         
-        # Debug logging to see what we're receiving
-        logger.debug(f"Training form data: {request.form}")
+        logger.debug(f"Received training request for model: {model_name}, dataset: {dataset_name}")
         
-        # Validate required fields
         if not model_name:
             logger.error("Missing model_name field")
             return jsonify({'success': False, 'error': 'Model name is required'}), 400
@@ -742,6 +742,7 @@ def train_model():
             
         # Extract dataset name if it's in JSON format (coming from form)
         try:
+            import json
             dataset_dict = json.loads(dataset_name)
             if isinstance(dataset_dict, dict) and 'name' in dataset_dict:
                 dataset_name = dataset_dict['name']
@@ -756,51 +757,58 @@ def train_model():
         
         # Get optional fields with defaults
         try:
-            epochs = int(request.form.get('epochs', 10))
+            epochs = int(request.form.get('epochs', 5))
         except (ValueError, TypeError):
-            epochs = 10
+            epochs = 5
             
         try:
-            batch_size = int(request.form.get('batch_size', 32))
+            batch_size = int(request.form.get('batch_size', 8))
         except (ValueError, TypeError):
-            batch_size = 32
+            batch_size = 8
             
         try:
             learning_rate = float(request.form.get('learning_rate', 0.001))
         except (ValueError, TypeError):
             learning_rate = 0.001
             
-        data_augmentation = request.form.get('use_augmentation') == 'on'
+        data_augmentation = request.form.get('data_augmentation', 'off') == 'on'
         
-        # Check if dataset exists
+        # Validate dataset exists
         dataset_path = os.path.join(get_dataset_path(), dataset_name)
+        
         if not os.path.exists(dataset_path):
+            logger.error(f"Dataset {dataset_name} not found")
             return jsonify({
-                'success': False,
+                'success': False, 
                 'error': f'Dataset {dataset_name} not found'
             }), 404
             
-        # Check if model name already exists
-        model_dir = os.path.join(get_model_path(), 'saved_models', model_name)
-        if os.path.exists(model_dir):
-            return jsonify({
-                'success': False,
-                'error': f'Model {model_name} already exists'
-            }), 400
-            
-        # Start the training
-        start_model_training(
-            model_name, dataset_name, architecture, 
-            epochs, batch_size, learning_rate, data_augmentation
+        # Start training in background thread
+        success = start_model_training(
+            model_name, 
+            dataset_name,
+            architecture,
+            epochs,
+            batch_size,
+            learning_rate,
+            data_augmentation
         )
         
-        logger.info(f"Started training thread for model: {model_name}")
-        
-        return jsonify({
-            'success': True,
-            'message': f'Training started for model {model_name}',
-            'model_name': model_name
-        })
+        if success:
+            # Return immediate success response
+            logger.info(f"Model training started for {model_name}")
+            return jsonify({
+                'success': True,
+                'message': f'Training started for model: {model_name}',
+                'redirect': url_for('model_training.trainings')
+            })
+        else:
+            logger.error(f"Failed to start training for {model_name}")
+            return jsonify({
+                'success': False,
+                'error': 'Failed to start training process'
+            }), 500
+            
     except Exception as e:
         logger.error(f"Error starting model training: {e}")
         logger.error(traceback.format_exc())
@@ -808,6 +816,18 @@ def train_model():
             'success': False,
             'error': str(e)
         }), 500
+
+
+@model_training_bp.route('/trainings')
+def trainings():
+    """Render the trainings view page."""
+    try:
+        logger.info("Rendering trainings view page")
+        return render_template('model_training/train_index.html', active_tab='trainings')
+    except Exception as e:
+        logger.error(f"Error rendering trainings template: {e}")
+        logger.error(traceback.format_exc())
+        return str(e), 500
 
 
 @model_training_bp.route('/trainings/status')

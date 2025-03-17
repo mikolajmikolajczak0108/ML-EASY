@@ -17,7 +17,10 @@
             <h5 class="mb-0">Train New Model</h5>
         </div>
         <div class="card-body">
-            <form id="trainingForm" action="{{ url_for('model_training.train_model') }}" method="post">
+            <!-- Alert container for displaying messages -->
+            <div id="alertContainer" style="display: none;"></div>
+            
+            <form id="trainingForm" class="model-training-form" action="{{ url_for('model_training.train_model') }}" method="post">
                 <div class="mb-3">
                     <label for="modelName" class="form-label">Model Name</label>
                     <input type="text" class="form-control" id="modelName" name="model_name" required>
@@ -79,7 +82,7 @@
                 </div>
 
                 <div class="mb-3 form-check">
-                    <input type="checkbox" class="form-check-input" id="useAugmentation" name="use_augmentation" checked>
+                    <input type="checkbox" class="form-check-input" id="useAugmentation" name="data_augmentation" checked>
                     <label class="form-check-label" for="useAugmentation">
                         Use Data Augmentation
                         <i class="fas fa-question-circle text-primary" 
@@ -169,135 +172,6 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
-    document.addEventListener('DOMContentLoaded', function() {
-        const trainingForm = document.getElementById('trainingForm');
-        const trainingProgress = document.getElementById('trainingProgress');
-        const progressBar = document.getElementById('progressBar');
-        const statusText = document.getElementById('statusText');
-        const trainLoss = document.getElementById('trainLoss');
-        const trainAccuracy = document.getElementById('trainAccuracy');
-        const valLoss = document.getElementById('valLoss');
-        const valAccuracy = document.getElementById('valAccuracy');
-        const trainingComplete = document.getElementById('trainingComplete');
-        const trainingError = document.getElementById('trainingError');
-        const errorMessage = document.getElementById('errorMessage');
-        
-        let modelName = '';
-        let statusCheckInterval = null;
-        
-        // Initialize tooltips
-        const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
-        tooltipTriggerList.map(function (tooltipTriggerEl) {
-            return new bootstrap.Tooltip(tooltipTriggerEl)
-        });
-        
-        // Handle form submission
-        trainingForm.addEventListener('submit', function(e) {
-            e.preventDefault();
-            
-            // Create form data BEFORE disabling form elements
-            const formData = new FormData(trainingForm);
-            modelName = formData.get('model_name');
-            
-            // Show training progress section
-            trainingProgress.classList.remove('d-none');
-            
-            // Disable form AFTER creating FormData
-            Array.from(trainingForm.elements).forEach(element => {
-                element.disabled = true;
-            });
-            
-            // Submit form via AJAX
-            fetch(trainingForm.action, {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    // Start checking training status
-                    startStatusCheck(modelName);
-                } else {
-                    // Show error
-                    showError(data.error || 'An error occurred while starting training');
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                showError('An error occurred while starting training');
-            });
-        });
-        
-        function startStatusCheck(modelName) {
-            // Check status every 2 seconds
-            statusCheckInterval = setInterval(() => {
-                checkTrainingStatus(modelName);
-            }, 2000);
-        }
-        
-        function checkTrainingStatus(modelName) {
-            fetch(`/train/models/${modelName}/status`)
-                .then(response => response.json())
-                .then(status => {
-                    updateUIWithStatus(status);
-                    
-                    // If training is complete or errored, stop checking
-                    if (status.status === 'completed' || status.status === 'error') {
-                        clearInterval(statusCheckInterval);
-                    }
-                })
-                .catch(error => {
-                    console.error('Error checking status:', error);
-                });
-        }
-        
-        function updateUIWithStatus(status) {
-            // Update progress bar
-            if (status.progress !== undefined) {
-                const progress = Math.round(status.progress);
-                progressBar.style.width = `${progress}%`;
-                progressBar.textContent = `${progress}%`;
-                progressBar.setAttribute('aria-valuenow', progress);
-            }
-            
-            // Update status text
-            switch(status.status) {
-                case 'initializing':
-                    statusText.textContent = 'Initializing training...';
-                    break;
-                case 'training':
-                    statusText.textContent = `Training - Epoch ${status.epoch}`;
-                    break;
-                case 'validating':
-                    statusText.textContent = `Validating - Epoch ${status.epoch}`;
-                    break;
-                case 'completed':
-                    statusText.textContent = 'Training completed successfully!';
-                    trainingComplete.classList.remove('d-none');
-                    break;
-                case 'error':
-                    showError(status.error || 'An error occurred during training');
-                    break;
-                default:
-                    statusText.textContent = status.status || 'Unknown status';
-            }
-            
-            // Update metrics if available
-            if (status.metrics) {
-                trainLoss.textContent = status.metrics.loss ? status.metrics.loss.toFixed(4) : '-';
-                trainAccuracy.textContent = status.metrics.accuracy ? (status.metrics.accuracy * 100).toFixed(2) + '%' : '-';
-                valLoss.textContent = status.metrics.val_loss ? status.metrics.val_loss.toFixed(4) : '-';
-                valAccuracy.textContent = status.metrics.val_accuracy ? (status.metrics.val_accuracy * 100).toFixed(2) + '%' : '-';
-            }
-        }
-        
-        function showError(message) {
-            errorMessage.textContent = message;
-            trainingError.classList.remove('d-none');
-            statusText.textContent = 'Training error';
-            clearInterval(statusCheckInterval);
-        }
-    });
-</script>
+<!-- Include the model training JS file -->
+<script src="{{ url_for('static', filename='js/model_training.js') }}"></script>
 {% endblock %} 

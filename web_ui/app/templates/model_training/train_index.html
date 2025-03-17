@@ -11,14 +11,21 @@
         </ol>
     </nav>
 
+    <!-- Navigation tabs -->
     <ul class="nav nav-tabs mb-4" id="modelTrainingTabs" role="tablist">
         <li class="nav-item" role="presentation">
-            <button class="nav-link active" id="overview-tab" data-bs-toggle="tab" data-bs-target="#overview" type="button" role="tab" aria-controls="overview" aria-selected="true">
+            <button class="nav-link {% if not active_tab or active_tab == 'overview' %}active{% endif %}" 
+                id="overview-tab" data-bs-toggle="tab" data-bs-target="#overview" 
+                type="button" role="tab" aria-controls="overview" 
+                aria-selected="{% if not active_tab or active_tab == 'overview' %}true{% else %}false{% endif %}">
                 <i class="fas fa-home me-2"></i>Overview
             </button>
         </li>
         <li class="nav-item" role="presentation">
-            <button class="nav-link" id="trainings-tab" data-bs-toggle="tab" data-bs-target="#trainings" type="button" role="tab" aria-controls="trainings" aria-selected="false">
+            <button class="nav-link {% if active_tab == 'trainings' %}active{% endif %}" 
+                id="trainings-tab" data-bs-toggle="tab" data-bs-target="#trainings" 
+                type="button" role="tab" aria-controls="trainings" 
+                aria-selected="{% if active_tab == 'trainings' %}true{% else %}false{% endif %}">
                 <i class="fas fa-tasks me-2"></i>Trainings
                 <span class="badge bg-primary trainings-count" style="display: none;">0</span>
             </button>
@@ -27,7 +34,8 @@
 
     <div class="tab-content" id="modelTrainingTabsContent">
         <!-- Overview Tab Content -->
-        <div class="tab-pane fade show active" id="overview" role="tabpanel" aria-labelledby="overview-tab">
+        <div class="tab-pane fade {% if not active_tab or active_tab == 'overview' %}show active{% endif %}" 
+             id="overview" role="tabpanel" aria-labelledby="overview-tab">
             <div class="row mb-4">
                 <div class="col-md-6">
                     <div class="card shadow h-100">
@@ -124,7 +132,8 @@
         </div>
 
         <!-- Trainings Tab Content -->
-        <div class="tab-pane fade" id="trainings" role="tabpanel" aria-labelledby="trainings-tab">
+        <div class="tab-pane fade {% if active_tab == 'trainings' %}show active{% endif %}" 
+             id="trainings" role="tabpanel" aria-labelledby="trainings-tab">
             <div class="card shadow">
                 <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
                     <h5 class="mb-0"><i class="fas fa-tasks me-2"></i>Training Tasks</h5>
@@ -182,6 +191,14 @@
         
         // Auto-refresh active trainings every 5 seconds
         setInterval(loadTrainingTasks, 5000);
+        
+        // Enable tooltips
+        const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+        if (typeof bootstrap !== 'undefined' && bootstrap.Tooltip) {
+            tooltipTriggerList.forEach(function(tooltipTriggerEl) {
+                new bootstrap.Tooltip(tooltipTriggerEl);
+            });
+        }
     });
     
     function initTrainingsTab() {

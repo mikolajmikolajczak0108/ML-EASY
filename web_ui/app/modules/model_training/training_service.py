@@ -145,30 +145,65 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
             'status': 'preparing',
             'progress': 40,
             'stage': 'downloading_model',
-            'message': f'Downloading pre-trained {architecture} model...'
+            'message': f'Downloading pre-trained {architecture} model weights...'
         })
         
         logger.info(f"Building model architecture: {architecture}")
         
         # Map architecture string to fastai model
         try:
+            # First update status to inform user
+            update_training_status(model_name, {
+                'status': 'preparing',
+                'progress': 45,
+                'stage': 'downloading_model',
+                'message': f'Downloading pre-trained {architecture} model weights...'
+            })
+            
+            # Use fastai's timm models when possible for better compatibility
             if architecture == "ResNet50":
-                model_arch = models.resnet50
+                from fastai.vision.all import resnet50
+                model_arch = resnet50
             elif architecture == "MobileNetV2":
-                model_arch = models.mobilenet_v2
+                try:
+                    from timm import create_model
+                    model_arch = create_model('mobilenetv2_100', pretrained=True)
+                except ImportError:
+                    # Fallback to torchvision but configure correctly for fastai
+                    model = models.mobilenet_v2(weights='IMAGENET1K_V1')
+                    model_arch = model
             elif architecture == "EfficientNetB0":
-                # Manual implementation required as fastai doesn't include EfficientNet directly
-                model_arch = models.efficientnet_b0
+                try:
+                    from timm import create_model
+                    model_arch = create_model('efficientnet_b0', pretrained=True)
+                except ImportError:
+                    # Fallback to a model we know works with fastai
+                    from fastai.vision.all import resnet34
+                    logger.warning("EfficientNetB0 not available, using ResNet34 instead")
+                    model_arch = resnet34
+                    architecture = "ResNet34" 
             elif architecture == "VGG16":
-                model_arch = models.vgg16
+                from fastai.vision.all import vgg16
+                model_arch = vgg16
             elif architecture == "InceptionV3":
-                model_arch = models.inception_v3
+                try:
+                    # Special handling for Inception due to auxiliary outputs
+                    model = models.inception_v3(weights='IMAGENET1K_V1', aux_logits=False)
+                    model_arch = model
+                except Exception:
+                    # Fallback to a more compatible model
+                    from fastai.vision.all import resnet34
+                    logger.warning("InceptionV3 not available, using ResNet34 instead")
+                    model_arch = resnet34
+                    architecture = "ResNet34"
             elif architecture == "DenseNet121":
-                model_arch = models.densenet121
+                from fastai.vision.all import densenet121
+                model_arch = densenet121
             else:
-                # Default to ResNet34 if architecture not recognized
+                # Default to ResNet34 - most reliable with fastai
+                from fastai.vision.all import resnet34
                 logger.warning(f"Architecture {architecture} not recognized, using ResNet34")
-                model_arch = models.resnet34
+                model_arch = resnet34
                 architecture = "ResNet34"
             
             update_training_status(model_name, {
@@ -178,21 +213,44 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
                 'message': f'Creating {architecture} model for {num_classes} classes'
             })
             
-            # Create fastai learner
-            learn = vision_learner(
-                dls, 
-                model_arch, 
-                metrics=[accuracy, error_rate, Precision(), Recall(), F1Score()],
-                lr=learning_rate
-            )
-            
-            update_training_status(model_name, {
-                'status': 'preparing',
-                'progress': 60,
-                'stage': 'model_ready',
-                'message': 'Model architecture ready for training'
-            })
-            
+            # Create fastai learner with proper error handling
+            try:
+                learn = vision_learner(dls, model_arch, metrics=[accuracy, error_rate])
+                
+                # Add additional metrics after successful creation
+                learn.metrics.extend([Precision(), Recall(), F1Score()])
+                
+                # Set learning rate
+                learn.lr = learning_rate
+                
+                update_training_status(model_name, {
+                    'status': 'preparing',
+                    'progress': 60,
+                    'stage': 'model_ready',
+                    'message': 'Model architecture ready for training'
+                })
+            except Exception as model_err:
+                logger.error(f"Error creating vision_learner: {model_err}")
+                # Try more basic approach for problematic architectures
+                try:
+                    # Fall back to a simpler, more reliable model
+                    from fastai.vision.all import resnet18
+                    logger.warning(f"Falling back to ResNet18 due to compatibility issues")
+                    learn = vision_learner(dls, resnet18, metrics=[accuracy, error_rate])
+                    learn.metrics.extend([Precision(), Recall(), F1Score()])
+                    learn.lr = learning_rate
+                    architecture = "ResNet18 (fallback)"
+                    
+                    update_training_status(model_name, {
+                        'status': 'preparing',
+                        'progress': 60,
+                        'stage': 'model_ready',
+                        'message': 'Using fallback model architecture due to compatibility issues'
+                    })
+                except Exception as fallback_err:
+                    logger.error(f"Even fallback model failed: {fallback_err}")
+                    raise RuntimeError(f"Cannot create model learner: {model_err}. Fallback also failed: {fallback_err}")
+        
         except Exception as e:
             logger.error(f"Error creating model: {e}")
             logger.error(traceback.format_exc())
