@@ -33,9 +33,70 @@ def get_status_lock(model_name):
         _status_locks[model_name] = threading.RLock()
     return _status_locks[model_name]
 
+# Add file handler to logger for each training process
+def setup_file_logger(model_name):
+    """Set up a file logger for a specific training process."""
+    try:
+        # Get or create the logs directory
+        logs_dir = os.path.join(get_model_path(), 'logs')
+        os.makedirs(logs_dir, exist_ok=True)
+        
+        # Create a log file for this model
+        log_file = os.path.join(logs_dir, f"{model_name}.log")
+        
+        # Create a file handler
+        file_handler = logging.FileHandler(log_file, mode='w')
+        file_handler.setLevel(logging.INFO)
+        
+        # Create a formatter with timestamp
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        file_handler.setFormatter(formatter)
+        
+        # Get logger for this model
+        model_logger = logging.getLogger(f"model_training.{model_name}")
+        model_logger.setLevel(logging.INFO)
+        
+        # Remove any existing handlers to avoid duplicates
+        for handler in model_logger.handlers[:]:
+            if isinstance(handler, logging.FileHandler) and handler.baseFilename == log_file:
+                model_logger.removeHandler(handler)
+        
+        # Add the file handler to the logger
+        model_logger.addHandler(file_handler)
+        
+        return model_logger
+        
+    except Exception as e:
+        logger.error(f"Error setting up file logger for model {model_name}: {e}")
+        return logging.getLogger(__name__)  # Return default logger as fallback
+
+
+# Custom PrintLogger class that captures print output to both console and log file
+class PrintLogger:
+    def __init__(self, model_name):
+        self.terminal = sys.stdout
+        self.model_name = model_name
+        self.logger = logging.getLogger(f"model_training.{model_name}")
+        
+    def write(self, message):
+        self.terminal.write(message)
+        if message.strip():  # Only log non-empty messages
+            self.logger.info(message.strip())
+            
+    def flush(self):
+        self.terminal.flush()
+
+
 def train_model_task(model_name, dataset_name, architecture, epochs, batch_size, 
                     learning_rate, data_augmentation):
     """Background task to train a machine learning model with fastai/PyTorch."""
+    # Set up logging for this training process
+    model_logger = setup_file_logger(model_name)
+    
+    # Redirect print statements to also log to file
+    original_stdout = sys.stdout
+    sys.stdout = PrintLogger(model_name)
+    
     try:
         # Print to console directly for visibility
         print(f"\n\n===== STARTING TRAINING: {model_name} =====")
@@ -75,24 +136,7 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
             import torch
             print(f"PyTorch version: {torch.__version__}")
             
-            print("Importing torch.nn...")
-            import torch.nn as nn
-            
-            print("Importing torch.optim...")
-            import torch.optim as optim
-            
-            print("Importing torch.utils.data...")
-            from torch.utils.data import DataLoader, random_split
-            
-            print("Importing torchvision.transforms...")
-            import torchvision.transforms as transforms
-            
-            print("Importing torchvision.models...")
-            import torchvision.models as models
-            
-            print("Importing torchvision.datasets...")
-            from torchvision.datasets import ImageFolder
-            
+            # Only import what we actually need to use to speed up the process
             print("Importing fastai.vision.all...")
             from fastai.vision.all import (
                 ImageDataLoaders, 
@@ -106,6 +150,10 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
             
             print("Importing fastai.metrics...")
             from fastai.metrics import Precision, Recall, F1Score
+            
+            # Import torchvision for models only
+            print("Importing torchvision.models...")
+            import torchvision.models as models
             
             # Libraries imported successfully
             print("All libraries imported successfully!")
@@ -306,8 +354,7 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
                 
             # Set learning rate
             print(f"Setting learning rate to {learning_rate}")
-            learn.lr_find()
-            learn.fit_one_cycle(1, learning_rate)
+            learn.lr = learning_rate
             
             update_training_status(model_name, {
                 'status': 'preparing',
@@ -661,6 +708,10 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
         logger.error(f"Error training model {model_name}: {e}")
         logger.error(traceback.format_exc())
         
+        # Log to model-specific log file as well
+        model_logger.error(f"Error training model {model_name}: {e}")
+        model_logger.error(traceback.format_exc())
+        
         # Update status to error
         update_training_status(model_name, {
             'status': 'error',
@@ -668,6 +719,9 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
         })
         
         return False
+    finally:
+        # Restore original stdout
+        sys.stdout = original_stdout
 
 
 def update_training_status(model_name, status_update):

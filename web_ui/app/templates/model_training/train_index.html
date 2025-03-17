@@ -177,6 +177,336 @@
 
 {% block scripts %}
 <script>
+    // Helper to format progress for display
+    function formatProgress(progress) {
+        return progress ? Math.round(progress) + '%' : '0%';
+    }
+
+    // Helper function to generate training card HTML
+    function generateTrainingCard(training, type) {
+        const isActive = type === 'active';
+        const isCompleted = type === 'completed';
+        const isFailed = type === 'failed';
+        
+        // Card classes based on status
+        let cardClass = 'border-primary';
+        let headerClass = 'bg-primary text-white';
+        let statusBadgeClass = 'bg-primary';
+        
+        if (isCompleted) {
+            cardClass = 'border-success';
+            headerClass = 'bg-success text-white';
+            statusBadgeClass = 'bg-success';
+        } else if (isFailed) {
+            cardClass = 'border-danger';
+            headerClass = 'bg-danger text-white';
+            statusBadgeClass = 'bg-danger';
+        }
+        
+        // Format metrics
+        let metricsHtml = '';
+        if (training.metrics && Object.keys(training.metrics).length > 0) {
+            metricsHtml = `
+                <div class="mt-2">
+                    <h6 class="mb-1">Metrics:</h6>
+                    <div class="row gx-2">
+                        ${training.metrics.accuracy ? `
+                            <div class="col-md-3 mb-1">
+                                <div class="card border-info">
+                                    <div class="card-body p-2 text-center">
+                                        <div class="text-info mb-1">Accuracy</div>
+                                        <div class="fw-bold">${training.metrics.accuracy_pct || (training.metrics.accuracy * 100).toFixed(2) + '%'}</div>
+                                    </div>
+                                </div>
+                            </div>` : ''}
+                        ${training.metrics.val_accuracy ? `
+                            <div class="col-md-3 mb-1">
+                                <div class="card border-success">
+                                    <div class="card-body p-2 text-center">
+                                        <div class="text-success mb-1">Val Accuracy</div>
+                                        <div class="fw-bold">${training.metrics.val_accuracy_pct || (training.metrics.val_accuracy * 100).toFixed(2) + '%'}</div>
+                                    </div>
+                                </div>
+                            </div>` : ''}
+                        ${training.metrics.loss ? `
+                            <div class="col-md-3 mb-1">
+                                <div class="card border-warning">
+                                    <div class="card-body p-2 text-center">
+                                        <div class="text-warning mb-1">Loss</div>
+                                        <div class="fw-bold">${training.metrics.loss_formatted || training.metrics.loss.toFixed(4)}</div>
+                                    </div>
+                                </div>
+                            </div>` : ''}
+                        ${training.metrics.val_loss ? `
+                            <div class="col-md-3 mb-1">
+                                <div class="card border-danger">
+                                    <div class="card-body p-2 text-center">
+                                        <div class="text-danger mb-1">Val Loss</div>
+                                        <div class="fw-bold">${training.metrics.val_loss_formatted || training.metrics.val_loss.toFixed(4)}</div>
+                                    </div>
+                                </div>
+                            </div>` : ''}
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Format detailed stage info
+        let stageHtml = '';
+        if (training.stage) {
+            let stageLabel = training.stage_description || training.stage.replace('_', ' ');
+            stageHtml = `
+                <div class="mt-2">
+                    <p class="mb-1"><strong>Current Stage:</strong> ${stageLabel}</p>
+                </div>
+            `;
+        }
+        
+        // Format error info for failed trainings
+        let errorHtml = '';
+        if (isFailed && training.error) {
+            const errorType = training.error_type ? ` (${training.error_type})` : '';
+            errorHtml = `
+                <div class="alert alert-danger mt-2 mb-0">
+                    <strong>Error${errorType}:</strong> ${training.error}
+                </div>
+            `;
+        }
+        
+        // Format duration
+        let durationHtml = '';
+        if (training.duration_formatted) {
+            durationHtml = `<span class="badge bg-secondary ms-2">${training.duration_formatted}</span>`;
+        } else if (training.duration) {
+            const mins = Math.floor(training.duration / 60);
+            const secs = training.duration % 60;
+            durationHtml = `<span class="badge bg-secondary ms-2">${mins}m ${secs}s</span>`;
+        }
+        
+        // Format training details
+        let detailsHtml = `
+            <div class="mt-1">
+                <span class="badge ${statusBadgeClass}">${training.status || 'unknown'}</span>
+                ${durationHtml}
+            </div>
+            <div class="mt-2">
+                <p class="mb-1"><strong>Dataset:</strong> ${training.dataset || 'N/A'}</p>
+                <p class="mb-1"><strong>Architecture:</strong> ${training.architecture || 'N/A'}</p>
+                ${training.started_time ? `<p class="mb-1"><strong>Started:</strong> ${training.started_time}</p>` : ''}
+            </div>
+        `;
+        
+        // Create a progress bar for active trainings
+        let progressHtml = '';
+        if (isActive || (training.progress && training.progress < 100)) {
+            progressHtml = `
+                <div class="mt-3">
+                    <div class="progress" style="height: 20px;">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                             role="progressbar" 
+                             style="width: ${formatProgress(training.progress)};" 
+                             aria-valuenow="${training.progress || 0}" 
+                             aria-valuemin="0" 
+                             aria-valuemax="100">
+                            ${formatProgress(training.progress)}
+                        </div>
+                    </div>
+                    <p class="text-muted small mt-1 mb-0">${training.message || ''}</p>
+                </div>
+            `;
+        }
+        
+        // Create the card HTML
+        return `
+            <div class="card mb-3 ${cardClass}" id="training-${training.model_name}">
+                <div class="card-header ${headerClass} d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">${training.model_name || 'Unnamed Model'}</h5>
+                    ${isActive ? `
+                        <button class="btn btn-sm btn-light view-details-btn" 
+                                data-model="${training.model_name}">
+                            <i class="fas fa-terminal"></i> View Console
+                        </button>
+                    ` : ''}
+                </div>
+                <div class="card-body">
+                    ${detailsHtml}
+                    ${stageHtml}
+                    ${progressHtml}
+                    ${metricsHtml}
+                    ${errorHtml}
+                </div>
+            </div>
+        `;
+    }
+
+    // Function to update the UI with training data
+    function updateTrainingsUI(data) {
+        // Update active trainings
+        const activeContainer = document.getElementById('activeTrainings');
+        if (data.active && data.active.length > 0) {
+            let activeHtml = '';
+            data.active.forEach(training => {
+                activeHtml += generateTrainingCard(training, 'active');
+            });
+            activeContainer.innerHTML = activeHtml;
+            document.querySelector('.trainings-count').textContent = data.active.length;
+            document.querySelector('.trainings-count').style.display = 'inline';
+        } else {
+            activeContainer.innerHTML = `
+                <div class="text-center py-4">
+                    <p class="text-muted">No active training tasks</p>
+                    <a href="{{ url_for('model_training.new_model') }}" class="btn btn-primary btn-sm mt-2">
+                        <i class="fas fa-plus-circle me-2"></i>Start New Training
+                    </a>
+                </div>
+            `;
+            document.querySelector('.trainings-count').style.display = 'none';
+        }
+        
+        // Update completed trainings
+        const completedContainer = document.getElementById('completedTrainings');
+        if (data.completed && data.completed.length > 0) {
+            let completedHtml = '';
+            data.completed.forEach(training => {
+                completedHtml += generateTrainingCard(training, 'completed');
+            });
+            completedContainer.innerHTML = completedHtml;
+        } else {
+            completedContainer.innerHTML = `
+                <div class="text-center py-4">
+                    <p class="text-muted">No completed training tasks</p>
+                </div>
+            `;
+        }
+        
+        // Update failed trainings
+        const failedContainer = document.getElementById('failedTrainings');
+        if (data.failed && data.failed.length > 0) {
+            let failedHtml = '';
+            data.failed.forEach(training => {
+                failedHtml += generateTrainingCard(training, 'failed');
+            });
+            failedContainer.innerHTML = failedHtml;
+        } else {
+            failedContainer.innerHTML = `
+                <div class="text-center py-4">
+                    <p class="text-muted">No failed training tasks</p>
+                </div>
+            `;
+        }
+        
+        // Add event listeners to view details buttons
+        document.querySelectorAll('.view-details-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const modelName = this.getAttribute('data-model');
+                showConsoleOutput(modelName);
+            });
+        });
+    }
+    
+    // Function to show console output in a modal
+    function showConsoleOutput(modelName) {
+        // Create modal if it doesn't exist
+        if (!document.getElementById('consoleOutputModal')) {
+            const modalHtml = `
+                <div class="modal fade" id="consoleOutputModal" tabindex="-1" aria-labelledby="consoleOutputModalLabel" aria-hidden="true">
+                    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title" id="consoleOutputModalLabel">Console Output</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                            </div>
+                            <div class="modal-body">
+                                <div class="console-output-container bg-dark text-light p-3" style="font-family: monospace; height: 400px; overflow-y: auto;">
+                                    <div id="consoleOutputContent">Loading console output...</div>
+                                </div>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+            
+            // Initialize the modal
+            if (typeof bootstrap !== 'undefined') {
+                window.consoleModal = new bootstrap.Modal(document.getElementById('consoleOutputModal'));
+            }
+        }
+        
+        // Update modal title and show loading indicator
+        document.getElementById('consoleOutputModalLabel').textContent = `Console Output: ${modelName}`;
+        document.getElementById('consoleOutputContent').innerHTML = `
+            <div class="text-center">
+                <div class="spinner-border text-light" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p class="mt-2">Loading console output...</p>
+            </div>
+        `;
+        
+        // Show the modal
+        if (window.consoleModal) {
+            window.consoleModal.show();
+        } else if (typeof bootstrap !== 'undefined') {
+            const modal = new bootstrap.Modal(document.getElementById('consoleOutputModal'));
+            window.consoleModal = modal;
+            modal.show();
+        } else {
+            document.getElementById('consoleOutputModal').classList.add('show');
+            document.getElementById('consoleOutputModal').style.display = 'block';
+        }
+        
+        // Fetch console output (this endpoint will need to be implemented)
+        fetch(`/train/models/${modelName}/console`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.console_output) {
+                    const formattedOutput = data.console_output
+                        .replace(/\n/g, '<br>')
+                        .replace(/ERROR/g, '<span class="text-danger">ERROR</span>')
+                        .replace(/Warning/g, '<span class="text-warning">Warning</span>')
+                        .replace(/Success/g, '<span class="text-success">Success</span>');
+                    
+                    document.getElementById('consoleOutputContent').innerHTML = formattedOutput || 'No console output available.';
+                } else {
+                    document.getElementById('consoleOutputContent').innerHTML = 'No console output available.';
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching console output:', error);
+                document.getElementById('consoleOutputContent').innerHTML = `
+                    <div class="alert alert-danger">
+                        Error fetching console output: ${error.message || 'Unknown error'}
+                    </div>
+                `;
+            });
+    }
+
+    // Function to load training tasks data
+    function loadTrainingTasks() {
+        fetch('/train/trainings/status')
+            .then(response => response.json())
+            .then(data => {
+                // Update UI with training data
+                updateTrainingsUI(data);
+            })
+            .catch(error => {
+                console.error('Error fetching training tasks:', error);
+                // Show error message in each container
+                const errorHtml = `
+                    <div class="alert alert-danger">
+                        Error loading training data: ${error.message || 'Unknown error'}
+                    </div>
+                `;
+                document.getElementById('activeTrainings').innerHTML = errorHtml;
+                document.getElementById('completedTrainings').innerHTML = errorHtml;
+                document.getElementById('failedTrainings').innerHTML = errorHtml;
+            });
+    }
+
     document.addEventListener('DOMContentLoaded', function() {
         // Initialize trainings tab functionality
         initTrainingsTab();
@@ -215,265 +545,6 @@
                 });
             });
         }
-    }
-    
-    function loadTrainingTasks() {
-        // Fetch all training tasks statuses
-        fetch('/train/trainings/status')
-            .then(response => response.json())
-            .then(data => {
-                updateTrainingLists(data);
-            })
-            .catch(error => {
-                console.error('Error fetching training status:', error);
-                showTrainingLoadError();
-            });
-    }
-    
-    function updateTrainingLists(data) {
-        const activeTrainings = data.active || [];
-        const completedTrainings = data.completed || [];
-        const failedTrainings = data.failed || [];
-        
-        // Update badge count
-        updateActiveTrainingsCount(activeTrainings.length);
-        
-        // Update active trainings list
-        const activeContainer = document.getElementById('activeTrainings');
-        if (activeTrainings.length > 0) {
-            activeContainer.innerHTML = buildTrainingCards(activeTrainings, 'active');
-        } else {
-            activeContainer.innerHTML = '<p class="text-center text-muted py-3">No active training tasks</p>';
-        }
-        
-        // Update completed trainings list
-        const completedContainer = document.getElementById('completedTrainings');
-        if (completedTrainings.length > 0) {
-            completedContainer.innerHTML = buildTrainingCards(completedTrainings, 'completed');
-        } else {
-            completedContainer.innerHTML = '<p class="text-center text-muted py-3">No completed training tasks</p>';
-        }
-        
-        // Update failed trainings list
-        const failedContainer = document.getElementById('failedTrainings');
-        if (failedTrainings.length > 0) {
-            failedContainer.innerHTML = buildTrainingCards(failedTrainings, 'failed');
-        } else {
-            failedContainer.innerHTML = '<p class="text-center text-muted py-3">No failed training tasks</p>';
-        }
-    }
-    
-    function updateActiveTrainingsCount(count) {
-        const badge = document.querySelector('.trainings-count');
-        if (badge) {
-            if (count > 0) {
-                badge.textContent = count;
-                badge.style.display = 'inline';
-            } else {
-                badge.style.display = 'none';
-            }
-        }
-    }
-    
-    function buildTrainingCards(trainings, type) {
-        let html = '<div class="row">';
-        
-        trainings.forEach(training => {
-            const progress = Math.min(100, Math.max(0, training.progress || 0));
-            const statusClass = getStatusClass(training.status);
-            const metrics = training.metrics || {};
-            const stage = training.stage || 'unknown';
-            const startTime = training.start_time ? new Date(training.start_time).toLocaleString() : 'Unknown';
-            
-            html += `
-            <div class="col-md-6 mb-3">
-                <div class="card shadow-sm">
-                    <div class="card-header ${statusClass} text-white d-flex justify-content-between align-items-center">
-                        <h6 class="mb-0">${training.model_name}</h6>
-                        <span class="badge bg-light text-dark">${training.status}</span>
-                    </div>
-                    <div class="card-body">
-                        <div class="mb-2 d-flex justify-content-between">
-                            <small>Dataset: <strong>${training.dataset}</strong></small>
-                            <small>Architecture: <strong>${training.architecture}</strong></small>
-                        </div>
-                        
-                        <div class="progress mb-3" style="height: 20px;">
-                            <div class="progress-bar ${statusClass}" role="progressbar" 
-                                style="width: ${progress}%" aria-valuenow="${progress}" 
-                                aria-valuemin="0" aria-valuemax="100">${progress.toFixed(0)}%</div>
-                        </div>
-                        
-                        <p class="text-muted mb-2">${training.message || getStageMessage(stage)}</p>
-                        
-                        ${type === 'active' ? getActiveTrainingDetails(training) : ''}
-                        ${type === 'completed' ? getCompletedTrainingDetails(training) : ''}
-                        ${type === 'failed' ? getFailedTrainingDetails(training) : ''}
-                        
-                        <div class="mt-3 text-end">
-                            <small class="text-muted">Started: ${startTime}</small>
-                        </div>
-                    </div>
-                </div>
-            </div>`;
-        });
-        
-        html += '</div>';
-        return html;
-    }
-    
-    function getActiveTrainingDetails(training) {
-        const metrics = training.metrics || {};
-        const epoch = training.epoch || 0;
-        const totalEpochs = training.total_epochs || '?';
-        
-        // Only show metrics if they exist and we're in training stage
-        if (training.status === 'training' && metrics.accuracy !== undefined) {
-            return `
-            <div class="row small mb-2">
-                <div class="col-6">
-                    <div class="d-flex justify-content-between">
-                        <span>Loss:</span>
-                        <span>${metrics.loss?.toFixed(4) || '-'}</span>
-                    </div>
-                    <div class="d-flex justify-content-between">
-                        <span>Accuracy:</span>
-                        <span>${(metrics.accuracy * 100)?.toFixed(2) || '-'}%</span>
-                    </div>
-                </div>
-                <div class="col-6">
-                    <div class="d-flex justify-content-between">
-                        <span>Val Loss:</span>
-                        <span>${metrics.val_loss?.toFixed(4) || '-'}</span>
-                    </div>
-                    <div class="d-flex justify-content-between">
-                        <span>Val Accuracy:</span>
-                        <span>${(metrics.val_accuracy * 100)?.toFixed(2) || '-'}%</span>
-                    </div>
-                </div>
-            </div>
-            <div class="d-flex justify-content-between align-items-center mt-2">
-                <small>Epoch: ${epoch}/${totalEpochs}</small>
-                <button class="btn btn-sm btn-outline-secondary" 
-                    onclick="window.location.href='/train/models/${training.model_name}/status'">
-                    View Details
-                </button>
-            </div>`;
-        } else {
-            return `
-            <div class="d-flex justify-content-between align-items-center mt-2">
-                <small>${getStageMessage(training.stage)}</small>
-                <button class="btn btn-sm btn-outline-secondary" 
-                    onclick="window.location.href='/train/models/${training.model_name}/status'">
-                    View Details
-                </button>
-            </div>`;
-        }
-    }
-    
-    function getCompletedTrainingDetails(training) {
-        const metrics = training.metrics || {};
-        return `
-        <div class="row small mb-2">
-            <div class="col-6">
-                <div class="d-flex justify-content-between">
-                    <span>Final Accuracy:</span>
-                    <span>${(metrics.accuracy * 100)?.toFixed(2) || '-'}%</span>
-                </div>
-                <div class="d-flex justify-content-between">
-                    <span>Val Accuracy:</span>
-                    <span>${(metrics.val_accuracy * 100)?.toFixed(2) || '-'}%</span>
-                </div>
-            </div>
-            <div class="col-6 text-end">
-                <button class="btn btn-sm btn-success" 
-                    onclick="window.location.href='/test?model=${training.model_name}'">
-                    Test Model
-                </button>
-                <button class="btn btn-sm btn-outline-secondary mt-1" 
-                    onclick="window.location.href='/train/models/${training.model_name}/details'">
-                    Details
-                </button>
-            </div>
-        </div>`;
-    }
-    
-    function getFailedTrainingDetails(training) {
-        return `
-        <div class="alert alert-danger py-2 mb-0">
-            <small><strong>Error:</strong> ${training.error || 'Unknown error occurred'}</small>
-        </div>`;
-    }
-    
-    function getStatusClass(status) {
-        switch(status) {
-            case 'initializing':
-            case 'preparing':
-                return 'bg-info';
-            case 'training':
-                return 'bg-primary';
-            case 'saving':
-                return 'bg-warning text-dark';
-            case 'completed':
-                return 'bg-success';
-            case 'error':
-                return 'bg-danger';
-            default:
-                return 'bg-secondary';
-        }
-    }
-    
-    function getStageMessage(stage) {
-        switch(stage) {
-            case 'importing_libraries':
-                return 'Importing required libraries...';
-            case 'libraries_imported':
-                return 'Libraries imported successfully';
-            case 'loading_dataset':
-                return 'Loading and preparing dataset...';
-            case 'creating_dataloaders':
-                return 'Creating data loaders...';
-            case 'dataset_ready':
-                return 'Dataset prepared successfully';
-            case 'downloading_model':
-                return 'Downloading pre-trained model architecture...';
-            case 'creating_model':
-                return 'Creating model architecture...';
-            case 'model_ready':
-                return 'Model architecture ready';
-            case 'starting_training':
-                return 'Starting model training...';
-            case 'training_epoch':
-                return 'Training in progress...';
-            case 'epoch_complete':
-                return 'Epoch complete, continuing training...';
-            case 'training_complete':
-                return 'Training complete!';
-            case 'saving_model':
-                return 'Saving trained model...';
-            case 'saving_metadata':
-                return 'Saving model metadata...';
-            case 'exporting_model':
-                return 'Exporting model to file...';
-            case 'completed':
-                return 'Training completed successfully!';
-            default:
-                return 'Processing...';
-        }
-    }
-    
-    function showTrainingLoadError() {
-        const containers = ['activeTrainings', 'completedTrainings', 'failedTrainings'];
-        containers.forEach(container => {
-            const element = document.getElementById(container);
-            if (element) {
-                element.innerHTML = `
-                <div class="alert alert-danger mb-0">
-                    <i class="fas fa-exclamation-triangle me-2"></i>
-                    Failed to load training information. Please try refreshing.
-                </div>`;
-            }
-        });
     }
 </script>
 {% endblock %} 

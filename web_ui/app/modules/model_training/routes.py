@@ -266,7 +266,9 @@ def edit_dataset(dataset_name):
                 try:
                     files_list = os.listdir(class_path)
                 except (PermissionError, OSError) as e:
-                    logger.error(f"Cannot list files in class directory {class_path}: {str(e)}")
+                    logger.error(
+                        f"Cannot list files in class directory {class_path}: {str(e)}"
+                    )
                     # Continue with next class instead of failing completely
                     continue
                 
@@ -337,7 +339,9 @@ def new_class(dataset_name):
         if cache_key in _dataset_info_cache:
             del _dataset_info_cache[cache_key]
         
-        logger.info(f"Class created successfully: {class_name} in dataset {dataset_name}")
+        logger.info(
+            f"Class created successfully: {class_name} in dataset {dataset_name}"
+        )
         return jsonify({
             'success': True,
             'class_name': class_name
@@ -475,7 +479,9 @@ def upload_to_class(dataset_name, class_name):
                             logger.debug(f"Saved file: {unique_filename}")
                         except Exception as e:
                             # Log the error but continue processing other files
-                            logger.error(f"Error saving file {file.filename}: {str(e)}")
+                            logger.error(
+                                f"Error saving file {file.filename}: {str(e)}"
+                            )
                             failed_files.append({
                                 'name': file.filename,
                                 'error': str(e)
@@ -505,7 +511,9 @@ def upload_to_class(dataset_name, class_name):
             del _class_image_cache[cache_key]
         
         if processing_count > 0:
-            logger.info(f"Successfully processed {processing_count} files for class {class_name}")
+            logger.info(
+                f"Successfully processed {processing_count} files for class {class_name}"
+            )
             return jsonify({
                 'success': True,
                 'message': f'Successfully processed {processing_count} files for {class_name}',
@@ -587,8 +595,10 @@ def get_class_images(dataset_name, class_name):
         for filename in os.listdir(class_dir):
             if os.path.isfile(os.path.join(class_dir, filename)) and allowed_file(filename):
                 # Create a URL for the image using our dataset_files route
-                image_url = url_for('model_training.dataset_files', 
-                                   filename=f'{dataset_name}/{class_name}/{filename}')
+                image_url = url_for(
+                    'model_training.dataset_files',
+                    filename=f'{dataset_name}/{class_name}/{filename}'
+                )
                 
                 images.append({
                     'filename': filename,
@@ -639,13 +649,18 @@ def example_datasets():
             # Create the example dataset
             created_dataset_name, classes = create_example_dataset(dataset_name, dataset_name)
                 
-            logger.info(f"Started downloading images for dataset: {created_dataset_name}")
+            logger.info(
+                f"Started downloading images for dataset: {created_dataset_name}"
+            )
             
             # Create a response for the client indicating success
             return jsonify({
                 'success': True,
                 'message': f'Dataset {created_dataset_name} created and downloading images',
-                'redirect': url_for('model_training.edit_dataset', dataset_name=created_dataset_name)
+                'redirect': url_for(
+                    'model_training.edit_dataset', 
+                    dataset_name=created_dataset_name
+                )
             })
         
         # Handle GET requests - show the example datasets page
@@ -656,7 +671,10 @@ def example_datasets():
             "Flowers": "/static/example_datasets/flowers.zip",
             "Food Items": "/static/example_datasets/food.zip"
         }
-        return render_template('model_training/example_datasets.html', datasets=datasets)
+        return render_template(
+            'model_training/example_datasets.html', 
+            datasets=datasets
+        )
     except Exception as e:
         logger.error(f"Error handling example_datasets: {e}")
         logger.error(traceback.format_exc())
@@ -730,19 +748,26 @@ def train_model():
         dataset_name = request.form.get('dataset', '')
         architecture = request.form.get('architecture', '')
         
-        logger.debug(f"Received training request for model: {model_name}, dataset: {dataset_name}")
+        logger.debug(
+            f"Received training request for model: {model_name}, dataset: {dataset_name}"
+        )
         
         if not model_name:
             logger.error("Missing model_name field")
-            return jsonify({'success': False, 'error': 'Model name is required'}), 400
+            return jsonify(
+                {'success': False, 'error': 'Model name is required'}
+            ), 400
             
         if not dataset_name:
             logger.error("Missing dataset field")
-            return jsonify({'success': False, 'error': 'Dataset is required'}), 400
+            return jsonify(
+                {'success': False, 'error': 'Dataset is required'}
+            ), 400
             
         # Extract dataset name if it's in JSON format (coming from form)
         try:
-            import json
+            # Import json here to avoid the error in the logs
+            # The global import is already at the top of the file
             dataset_dict = json.loads(dataset_name)
             if isinstance(dataset_dict, dict) and 'name' in dataset_dict:
                 dataset_name = dataset_dict['name']
@@ -753,7 +778,9 @@ def train_model():
             
         if not architecture:
             logger.error("Missing architecture field")
-            return jsonify({'success': False, 'error': 'Architecture is required'}), 400
+            return jsonify(
+                {'success': False, 'error': 'Architecture is required'}
+            ), 400
         
         # Get optional fields with defaults
         try:
@@ -823,7 +850,10 @@ def trainings():
     """Render the trainings view page."""
     try:
         logger.info("Rendering trainings view page")
-        return render_template('model_training/train_index.html', active_tab='trainings')
+        return render_template(
+            'model_training/train_index.html', 
+            active_tab='trainings'
+        )
     except Exception as e:
         logger.error(f"Error rendering trainings template: {e}")
         logger.error(traceback.format_exc())
@@ -862,16 +892,75 @@ def trainings_status():
                 
                 # Read status file
                 with open(os.path.join(status_dir, status_file), 'r') as f:
-                    status = json.load(f)
+                    file_content = f.read().strip()
+                    if not file_content:
+                        logger.warning(f"Empty status file: {status_file}")
+                        continue
+                        
+                    status = json.loads(file_content)
                     
                 # Add model name if not present
                 if 'model_name' not in status:
                     status['model_name'] = model_name
-                    
-                # Calculate duration if possible
-                if 'started_at' in status:
-                    status['duration'] = int(current_time - float(status['started_at']))
                 
+                # Add human-readable time and enhanced details
+                if 'started_at' in status:
+                    try:
+                        timestamp = float(status['started_at'])
+                        status['started_time'] = time.strftime('%Y-%m-%d %H:%M:%S', 
+                                                               time.localtime(timestamp))
+                        status['duration'] = int(current_time - timestamp)
+                        status['duration_formatted'] = format_duration(status['duration'])
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"Error parsing timestamp: {e}")
+                
+                # Add more detailed stage description based on the stage
+                if 'stage' in status:
+                    stage = status.get('stage', '')
+                    if stage == 'importing_libraries':
+                        status['stage_description'] = 'Importing PyTorch and fastai libraries'
+                    elif stage == 'libraries_imported':
+                        status['stage_description'] = 'Libraries imported successfully'
+                    elif stage == 'loading_dataset':
+                        status['stage_description'] = f'Loading dataset: {status.get("dataset", "")}'
+                    elif stage == 'creating_dataloaders':
+                        status['stage_description'] = 'Preparing data loaders'
+                    elif stage == 'dataloaders_created':
+                        status['stage_description'] = 'Data loaders ready'
+                    elif stage == 'downloading_model':
+                        status['stage_description'] = f'Downloading pre-trained weights for {status.get("architecture", "model")}'
+                    elif stage == 'creating_model':
+                        status['stage_description'] = f'Creating model architecture: {status.get("architecture", "")}'
+                    elif stage == 'model_created':
+                        status['stage_description'] = 'Model architecture created'
+                    elif stage == 'training_epoch':
+                        epoch = status.get('epoch', 0)
+                        total = status.get('total_epochs', 0)
+                        status['stage_description'] = f'Training epoch {epoch}/{total}'
+                    elif stage == 'epoch_complete':
+                        epoch = status.get('epoch', 0)
+                        total = status.get('total_epochs', 0)
+                        status['stage_description'] = f'Completed epoch {epoch}/{total}'
+                    elif stage == 'saving_model':
+                        status['stage_description'] = 'Saving trained model'
+                    elif stage == 'exporting_model':
+                        status['stage_description'] = 'Exporting model to file'
+                    elif stage == 'completed':
+                        status['stage_description'] = 'Training completed successfully'
+                    else:
+                        status['stage_description'] = stage.replace('_', ' ').capitalize()
+                        
+                # Process metrics for better display
+                if 'metrics' in status and isinstance(status['metrics'], dict):
+                    metrics = status['metrics']
+                    for key in metrics:
+                        if isinstance(metrics[key], float):
+                            # Format percentages nicely
+                            if key in ['accuracy', 'val_accuracy'] and 0 <= metrics[key] <= 1:
+                                metrics[f'{key}_pct'] = f"{metrics[key]*100:.2f}%"
+                            # Format other floats to 4 decimal places
+                            metrics[f'{key}_formatted'] = f"{metrics[key]:.4f}"
+                        
                 # Categorize based on status
                 if status.get('status') == 'completed':
                     completed_trainings.append(status)
@@ -883,7 +972,7 @@ def trainings_status():
                     status_file_path = os.path.join(status_dir, status_file)
                     last_modified = os.path.getmtime(status_file_path)
                     
-                    if current_time - last_modified > 600:  # 10 minutes
+                    if (current_time - last_modified) > 600:  # 10 minutes
                         # Mark as stale and move to failed
                         status['status'] = 'error'
                         status['error'] = 'Training process appears to be stalled'
@@ -897,25 +986,46 @@ def trainings_status():
                 failed_trainings.append({
                     'model_name': os.path.splitext(status_file)[0],
                     'status': 'error',
-                    'error': f"Error reading status: {str(e)}"
+                    'error': f"Error reading status file: {str(e)}",
+                    'error_type': 'file_error'
                 })
                 
         # Sort trainings: active by start time (recent first), completed by completion time
         active_trainings.sort(key=lambda x: x.get('started_at', 0), reverse=True)
         completed_trainings.sort(key=lambda x: x.get('completed_at', 0), reverse=True)
+        failed_trainings.sort(key=lambda x: x.get('started_at', 0), reverse=True)
         
         return jsonify({
             'active': active_trainings,
             'completed': completed_trainings,
             'failed': failed_trainings
         })
+        
     except Exception as e:
-        logger.error(f"Error getting training statuses: {e}")
+        logger.error(f"Error getting training status: {e}")
         logger.error(traceback.format_exc())
         return jsonify({
-            'success': False,
-            'error': str(e)
+            'error': str(e),
+            'active': [],
+            'completed': [],
+            'failed': []
         }), 500
+
+
+def format_duration(seconds):
+    """Format duration in seconds to a readable string."""
+    if seconds < 60:
+        return f"{seconds} seconds"
+    elif seconds < 3600:
+        minutes = seconds // 60
+        return f"{minutes} minute{'s' if minutes != 1 else ''}"
+    else:
+        hours = seconds // 3600
+        minutes = (seconds % 3600) // 60
+        if minutes > 0:
+            return f"{hours} hour{'s' if hours != 1 else ''} {minutes} minute{'s' if minutes != 1 else ''}"
+        else:
+            return f"{hours} hour{'s' if hours != 1 else ''}"
 
 
 @model_training_bp.route('/models/<model_name>/status')
@@ -930,4 +1040,43 @@ def model_status(model_name):
         return jsonify({
             'status': 'error',
             'error': str(e)
-        }), 500 
+        }), 500
+
+
+@model_training_bp.route('/models/<model_name>/console')
+def model_console(model_name):
+    """Get console output for a specific model training process."""
+    try:
+        # Path to log file for this model
+        log_dir = os.path.join(get_model_path(), 'logs')
+        os.makedirs(log_dir, exist_ok=True)
+        log_file = os.path.join(log_dir, f"{model_name}.log")
+        
+        # Check if log file exists
+        if not os.path.exists(log_file):
+            # Return empty console output if no log file
+            return jsonify({
+                'success': True,
+                'model_name': model_name,
+                'console_output': f"No console log file found for model {model_name}.\n"
+                                 f"This could mean the training hasn't generated any console output yet."
+            })
+        
+        # Read the log file content
+        with open(log_file, 'r') as f:
+            log_content = f.read()
+        
+        return jsonify({
+            'success': True,
+            'model_name': model_name,
+            'console_output': log_content
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting console output for model {model_name}: {e}")
+        logger.error(traceback.format_exc())
+        return jsonify({
+            'success': False,
+            'error': f"Error retrieving console output: {str(e)}",
+            'console_output': f"Error: {str(e)}\n{traceback.format_exc()}"
+        }) 
