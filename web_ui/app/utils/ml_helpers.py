@@ -32,20 +32,53 @@ def get_available_models():
     Get a list of available trained models.
     
     Returns:
-        list: List of model filenames
+        list: List of model names
     """
-    models_path = os.path.join(current_app.config['MODEL_PATH'], 'saved_models')
+    # Get base model path from config
+    base_models_path = current_app.config['MODEL_PATH']
+    models = []
     
-    # Create directory if it doesn't exist
-    os.makedirs(models_path, exist_ok=True)
+    # Check the main models directory for .pkl and .h5 files
+    if os.path.exists(base_models_path):
+        for item in os.listdir(base_models_path):
+            item_path = os.path.join(base_models_path, item)
+            
+            # Check if it's a direct model file (.pkl or .h5)
+            if os.path.isfile(item_path) and (item.endswith('.pkl') or item.endswith('.h5')):
+                # Add the filename without extension as the model name
+                model_name = os.path.splitext(item)[0]
+                if model_name not in models:
+                    models.append(model_name)
+                    
+            # Check if it's a directory that might contain models
+            elif os.path.isdir(item_path) and item != 'saved_models':
+                # Check for model files within this directory
+                for file in os.listdir(item_path):
+                    if file.endswith('.pkl') or file.endswith('.h5'):
+                        # Use directory name as the model name
+                        if item not in models:
+                            models.append(item)
+                            break
     
-    # Check if directory exists and has models
-    if not os.path.exists(models_path):
-        return []
-        
-    # Return list of model directories (instead of .pkl files)
-    return [m for m in os.listdir(models_path) 
-           if os.path.isdir(os.path.join(models_path, m))]
+    # Also check the saved_models subdirectory
+    saved_models_path = os.path.join(base_models_path, 'saved_models')
+    if os.path.exists(saved_models_path):
+        for item in os.listdir(saved_models_path):
+            item_path = os.path.join(saved_models_path, item)
+            
+            # Include directories in saved_models
+            if os.path.isdir(item_path):
+                # Check if the directory contains model files
+                has_model_file = False
+                for file in os.listdir(item_path):
+                    if file.endswith('.pkl') or file.endswith('.h5') or file == 'metadata.json':
+                        has_model_file = True
+                        break
+                        
+                if has_model_file and item not in models:
+                    models.append(item)
+    
+    return models
 
 
 def get_available_datasets():
@@ -85,33 +118,68 @@ def load_model(model_name):
     Load a trained model.
     
     Args:
-        model_name: Name of the model directory
+        model_name: Name of the model (directory or file without extension)
         
     Returns:
         model: Loaded model or None if loading fails
     """
-    models_path = os.path.join(current_app.config['MODEL_PATH'], 'saved_models')
-    model_dir = os.path.join(models_path, model_name)
+    base_models_path = current_app.config['MODEL_PATH']
     
     try:
-        # Check if the model directory exists
+        # Check possible locations for this model
+        
+        # 1. Check if it's a .pkl file in the base models directory
+        model_file = os.path.join(base_models_path, f"{model_name}.pkl")
+        if os.path.exists(model_file) and os.path.isfile(model_file):
+            return load_learner(model_file)
+            
+        # 2. Check if it's a .h5 file in the base models directory
+        model_file = os.path.join(base_models_path, f"{model_name}.h5")
+        if os.path.exists(model_file) and os.path.isfile(model_file):
+            try:
+                from tensorflow.keras.models import load_model as keras_load_model
+                return keras_load_model(model_file)
+            except ImportError:
+                print("TensorFlow not installed - cannot load .h5 model")
+                return None
+                
+        # 3. Check if it's a subdirectory of base_models_path
+        model_dir = os.path.join(base_models_path, model_name)
         if os.path.exists(model_dir) and os.path.isdir(model_dir):
+            # Look for model files in the directory
+            # Start with .pkl files
+            for file in os.listdir(model_dir):
+                if file.endswith('.pkl'):
+                    return load_learner(os.path.join(model_dir, file))
+                    
+            # Then check for .h5 files
+            for file in os.listdir(model_dir):
+                if file.endswith('.h5'):
+                    try:
+                        from tensorflow.keras.models import load_model as keras_load_model
+                        return keras_load_model(os.path.join(model_dir, file))
+                    except ImportError:
+                        print("TensorFlow not installed - cannot load .h5 model")
+                        return None
+        
+        # 4. Check in the saved_models subdirectory
+        saved_models_dir = os.path.join(base_models_path, 'saved_models', model_name)
+        if os.path.exists(saved_models_dir) and os.path.isdir(saved_models_dir):
             # Try different file formats in order
             
-            # 1. Look for export.pkl (fastai format)
-            model_file = os.path.join(model_dir, 'export.pkl')
+            # First look for export.pkl (fastai format)
+            model_file = os.path.join(saved_models_dir, 'export.pkl')
             if os.path.exists(model_file):
                 return load_learner(model_file)
                 
-            # 2. Look for model.pkl (fastai format)
-            model_file = os.path.join(model_dir, 'model.pkl')
+            # Then look for model.pkl (fastai format)
+            model_file = os.path.join(saved_models_dir, 'model.pkl')
             if os.path.exists(model_file):
                 return load_learner(model_file)
                 
-            # 3. Look for model.h5 (Keras/TensorFlow format)
-            model_file = os.path.join(model_dir, 'model.h5')
+            # Then look for model.h5 (Keras/TensorFlow format)
+            model_file = os.path.join(saved_models_dir, 'model.h5')
             if os.path.exists(model_file):
-                # Need to use Keras/TensorFlow loader
                 try:
                     from tensorflow.keras.models import load_model as keras_load_model
                     return keras_load_model(model_file)
@@ -119,21 +187,23 @@ def load_model(model_name):
                     print("TensorFlow not installed - cannot load .h5 model")
                     return None
             
-            # 4. Check for any .h5 file
-            h5_files = [f for f in os.listdir(model_dir) if f.endswith('.h5')]
+            # Check for any .h5 file
+            h5_files = [f for f in os.listdir(saved_models_dir) if f.endswith('.h5')]
             if h5_files:
                 try:
                     from tensorflow.keras.models import load_model as keras_load_model
-                    return keras_load_model(os.path.join(model_dir, h5_files[0]))
+                    return keras_load_model(os.path.join(saved_models_dir, h5_files[0]))
                 except ImportError:
                     print("TensorFlow not installed - cannot load .h5 model")
                     return None
                     
-            # 5. Check for any .pkl file
-            pkl_files = [f for f in os.listdir(model_dir) if f.endswith('.pkl')]
+            # Check for any .pkl file
+            pkl_files = [f for f in os.listdir(saved_models_dir) if f.endswith('.pkl')]
             if pkl_files:
-                return load_learner(os.path.join(model_dir, pkl_files[0]))
+                return load_learner(os.path.join(saved_models_dir, pkl_files[0]))
                 
+        # Model not found in any location
+        print(f"Model '{model_name}' not found in any location")
         return None
     except Exception as e:
         # Add logging for debugging
