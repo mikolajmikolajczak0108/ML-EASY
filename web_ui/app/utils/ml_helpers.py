@@ -34,8 +34,18 @@ def get_available_models():
     Returns:
         list: List of model filenames
     """
-    models_path = current_app.config['MODEL_PATH']
-    return [f for f in os.listdir(models_path) if f.endswith('.pkl')]
+    models_path = os.path.join(current_app.config['MODEL_PATH'], 'saved_models')
+    
+    # Create directory if it doesn't exist
+    os.makedirs(models_path, exist_ok=True)
+    
+    # Check if directory exists and has models
+    if not os.path.exists(models_path):
+        return []
+        
+    # Return list of model directories (instead of .pkl files)
+    return [m for m in os.listdir(models_path) 
+           if os.path.isdir(os.path.join(models_path, m))]
 
 
 def get_available_datasets():
@@ -75,17 +85,30 @@ def load_model(model_name):
     Load a trained fastai model.
     
     Args:
-        model_name: Name of the model file
+        model_name: Name of the model directory
         
     Returns:
         model: Loaded model or None if loading fails
     """
-    model_path = os.path.join(current_app.config['MODEL_PATH'], model_name)
+    models_path = os.path.join(current_app.config['MODEL_PATH'], 'saved_models')
+    model_dir = os.path.join(models_path, model_name)
+    
     try:
-        if os.path.exists(model_path):
-            return load_learner(model_path)
+        # Check if the model directory exists
+        if os.path.exists(model_dir) and os.path.isdir(model_dir):
+            # Look for export.pkl inside the model directory
+            model_file = os.path.join(model_dir, 'export.pkl')
+            if os.path.exists(model_file):
+                return load_learner(model_file)
+            else:
+                # If export.pkl doesn't exist, try model.pkl
+                model_file = os.path.join(model_dir, 'model.pkl')
+                if os.path.exists(model_file):
+                    return load_learner(model_file)
         return None
-    except Exception:
+    except Exception as e:
+        # Add logging for debugging
+        print(f"Error loading model {model_name}: {str(e)}")
         return None
 
 
