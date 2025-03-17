@@ -7,11 +7,21 @@ import threading
 import shutil
 from pathlib import Path
 import tempfile
+import sys
 
 from .utils import get_model_path, get_dataset_path
 
-# Initialize logger
+# Initialize logger with console output
 logger = logging.getLogger(__name__)
+
+# Add a console handler if not already present
+if not any(isinstance(h, logging.StreamHandler) and h.stream == sys.stdout for h in logger.handlers):
+    console = logging.StreamHandler(sys.stdout)
+    console.setLevel(logging.INFO)
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    console.setFormatter(formatter)
+    logger.addHandler(console)
+    logger.setLevel(logging.INFO)
 
 # File lock for thread safety
 _status_locks = {}
@@ -27,6 +37,14 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
                     learning_rate, data_augmentation):
     """Background task to train a machine learning model with fastai/PyTorch."""
     try:
+        # Print to console directly for visibility
+        print(f"\n\n===== STARTING TRAINING: {model_name} =====")
+        print(f"Dataset: {dataset_name}")
+        print(f"Architecture: {architecture}")
+        print(f"Epochs: {epochs}, Batch Size: {batch_size}")
+        print(f"Learning Rate: {learning_rate}, Data Augmentation: {data_augmentation}")
+        print("=" * 50)
+        
         # Disable PyTorch multiprocessing to avoid Windows errors
         os.environ['OMP_NUM_THREADS'] = '1'
         os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:64'
@@ -49,27 +67,48 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
         })
             
         logger.info(f"Started training model: {model_name} with dataset: {dataset_name}")
+        print("Importing libraries... This might take a moment...")
         
         # Import fastai/torch here to avoid blocking the main thread during import
         try:
+            print("Importing PyTorch...")
             import torch
+            print(f"PyTorch version: {torch.__version__}")
+            
+            print("Importing torch.nn...")
             import torch.nn as nn
+            
+            print("Importing torch.optim...")
             import torch.optim as optim
+            
+            print("Importing torch.utils.data...")
             from torch.utils.data import DataLoader, random_split
+            
+            print("Importing torchvision.transforms...")
             import torchvision.transforms as transforms
+            
+            print("Importing torchvision.models...")
             import torchvision.models as models
+            
+            print("Importing torchvision.datasets...")
             from torchvision.datasets import ImageFolder
+            
+            print("Importing fastai.vision.all...")
             from fastai.vision.all import (
                 ImageDataLoaders, 
                 Resize, 
                 vision_learner, 
                 error_rate, 
                 accuracy,
-                RandomResizedCrop
+                RandomResizedCrop,
+                aug_transforms
             )
+            
+            print("Importing fastai.metrics...")
             from fastai.metrics import Precision, Recall, F1Score
             
             # Libraries imported successfully
+            print("All libraries imported successfully!")
             update_training_status(model_name, {
                 'status': 'preparing',
                 'progress': 10,
@@ -79,6 +118,8 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
             
         except ImportError as e:
             logger.error(f"Failed to import required libraries: {e}")
+            print(f"ERROR IMPORTING LIBRARIES: {e}")
+            print(traceback.format_exc())
             update_training_status(model_name, {
                 'status': 'error',
                 'error': f"Failed to import required libraries: {e}",
@@ -95,26 +136,34 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
         })
         
         logger.info(f"Preparing dataset: {dataset_name}")
+        print(f"\nPreparing dataset: {dataset_name}")
         dataset_path = os.path.join(get_dataset_path(), dataset_name)
+        print(f"Dataset path: {dataset_path}")
         
         # Verify that dataset directory exists and contains image files
         if not os.path.exists(dataset_path):
             error_msg = f"Dataset directory not found: {dataset_path}"
             logger.error(error_msg)
+            print(f"ERROR: {error_msg}")
             update_training_status(model_name, {
                 'status': 'error',
                 'error': error_msg,
                 'error_type': 'dataset_not_found'
             })
             return False
+        else:
+            print(f"Dataset directory exists: {dataset_path}")
             
         # Check if dataset has valid structure with class subdirectories
         subdirs = [d for d in os.listdir(dataset_path) 
                  if os.path.isdir(os.path.join(dataset_path, d))]
         
+        print(f"Found {len(subdirs)} class directories: {subdirs}")
+        
         if not subdirs:
             error_msg = f"No class subdirectories found in dataset: {dataset_path}"
             logger.error(error_msg)
+            print(f"ERROR: {error_msg}")
             update_training_status(model_name, {
                 'status': 'error',
                 'error': error_msg,
@@ -124,208 +173,157 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
             
         # Check if each class directory has images
         has_images = False
+        image_counts = {}
         for subdir in subdirs:
             class_dir = os.path.join(dataset_path, subdir)
             image_files = [f for f in os.listdir(class_dir) 
                           if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif'))]
+            image_counts[subdir] = len(image_files)
+            print(f"Class '{subdir}': {len(image_files)} images")
             if image_files:
                 has_images = True
-                break
                 
         if not has_images:
             error_msg = f"No image files found in dataset class directories: {dataset_path}"
             logger.error(error_msg)
+            print(f"ERROR: {error_msg}")
             update_training_status(model_name, {
                 'status': 'error',
                 'error': error_msg,
                 'error_type': 'empty_dataset'
             })
             return False
+        else:
+            print(f"Dataset has images. Class counts: {image_counts}")
             
         # Set up augmentations based on user selection
         if data_augmentation:
             tfms = [
-                Resize(224),
-                RandomResizedCrop(224, min_scale=0.8)
+                RandomResizedCrop(224, min_scale=0.5),
+                *aug_transforms()
             ]
+            print(f"Using data augmentation with: RandomResizedCrop, aug_transforms()")
         else:
             tfms = [Resize(224)]
-        
-        # Create fastai DataLoaders
-        try:
-            # Path object is needed for fastai
-            path = Path(dataset_path)
+            print(f"Using minimal transformations: Resize(224)")
             
-            update_training_status(model_name, {
-                'status': 'preparing',
-                'progress': 20,
-                'stage': 'creating_dataloaders',
-                'message': 'Creating data loaders from images'
-            })
-            
-            # Create fastai DataLoaders
-            dls = ImageDataLoaders.from_folder(
-                path,
-                valid_pct=0.2,                   # 20% validation split
-                item_tfms=tfms,                  # Transformations applied to each item
-                batch_size=batch_size,
-                seed=42                          # For reproducibility
-            )
-            
-            # Get class names
-            class_names = dls.vocab
-            num_classes = len(class_names)
-            
-            logger.info(f"Successfully loaded dataset with {num_classes} classes: {class_names}")
-            logger.info(f"Training batches: {len(dls.train)}, Validation batches: {len(dls.valid)}")
-            
-            update_training_status(model_name, {
-                'status': 'preparing',
-                'progress': 30,
-                'stage': 'dataset_ready',
-                'message': f'Dataset ready with {num_classes} classes',
-                'details': {
-                    'classes': class_names,
-                    'num_classes': num_classes,
-                    'training_batches': len(dls.train),
-                    'validation_batches': len(dls.valid)
-                }
-            })
-            
-        except Exception as e:
-            logger.error(f"Error creating DataLoaders: {e}")
-            logger.error(traceback.format_exc())
-            update_training_status(model_name, {
-                'status': 'error',
-                'error': f"Error loading dataset: {str(e)}",
-                'error_type': 'dataset_error'
-            })
-            raise
-        
-        # 2. Create model architecture
+        # Create DataLoaders
         update_training_status(model_name, {
             'status': 'preparing',
-            'progress': 40,
-            'stage': 'downloading_model',
-            'message': f'Downloading pre-trained {architecture} model weights...'
+            'progress': 30,
+            'stage': 'creating_dataloaders',
+            'message': 'Creating DataLoaders...'
         })
         
-        logger.info(f"Building model architecture: {architecture}")
-        
-        # Map architecture string to fastai model
+        print(f"\nCreating DataLoaders with batch size: {batch_size}")
         try:
-            # First update status to inform user
-            update_training_status(model_name, {
-                'status': 'preparing',
-                'progress': 45,
-                'stage': 'downloading_model',
-                'message': f'Downloading pre-trained {architecture} model weights...'
-            })
+            print(f"Creating Path object for dataset: {dataset_path}")
+            path = Path(dataset_path)
+            print(f"Setting up DataLoaders with batch_size={batch_size}, transforms=Resize(224) + Augmentations: {data_augmentation}")
             
-            # Use fastai's timm models when possible for better compatibility
-            if architecture == "ResNet50":
-                from fastai.vision.all import resnet50
-                model_arch = resnet50
-            elif architecture == "MobileNetV2":
-                try:
-                    # Use direct torchvision model for MobileNetV2
-                    # First create the base model with pretrained weights
-                    from torchvision import models
-                    model = models.mobilenet_v2(weights='IMAGENET1K_V1')
-                    # Use the model directly (fastai will handle the head)
-                    model_arch = model
-                except Exception as mobile_err:
-                    logger.error(f"Error with MobileNetV2: {mobile_err}")
-                    # Fallback to ResNet18 which is very reliable
-                    from fastai.vision.all import resnet18
-                    logger.warning("MobileNetV2 failed, using ResNet18 instead")
-                    model_arch = resnet18
-                    architecture = "ResNet18 (fallback)"
-            elif architecture == "EfficientNetB0":
-                try:
-                    from timm import create_model
-                    model_arch = create_model('efficientnet_b0', pretrained=True)
-                except ImportError:
-                    # Fallback to a model we know works with fastai
-                    from fastai.vision.all import resnet34
-                    logger.warning("EfficientNetB0 not available, using ResNet34 instead")
-                    model_arch = resnet34
-                    architecture = "ResNet34" 
-            elif architecture == "VGG16":
-                from fastai.vision.all import vgg16
-                model_arch = vgg16
-            elif architecture == "InceptionV3":
-                try:
-                    # Special handling for Inception due to auxiliary outputs
-                    model = models.inception_v3(weights='IMAGENET1K_V1', aux_logits=False)
-                    model_arch = model
-                except Exception:
-                    # Fallback to a more compatible model
-                    from fastai.vision.all import resnet34
-                    logger.warning("InceptionV3 not available, using ResNet34 instead")
-                    model_arch = resnet34
-                    architecture = "ResNet34"
-            elif architecture == "DenseNet121":
-                from fastai.vision.all import densenet121
-                model_arch = densenet121
-            else:
-                # Default to ResNet34 - most reliable with fastai
-                from fastai.vision.all import resnet34
-                logger.warning(f"Architecture {architecture} not recognized, using ResNet34")
-                model_arch = resnet34
-                architecture = "ResNet34"
+            dls = ImageDataLoaders.from_folder(
+                path,
+                valid_pct=0.2,
+                seed=42,
+                bs=batch_size,
+                item_tfms=Resize(224),
+                batch_tfms=tfms,
+                num_workers=0  # Avoid Windows multiprocessing issues
+            )
+            
+            print(f"DataLoaders created. Number of classes: {len(dls.vocab)}")
+            print(f"Class names: {dls.vocab}")
+            print(f"Total items - Train: {len(dls.train_ds)}, Validation: {len(dls.valid_ds)}")
             
             update_training_status(model_name, {
                 'status': 'preparing',
-                'progress': 50,
-                'stage': 'creating_model',
-                'message': f'Creating {architecture} model for {num_classes} classes'
+                'progress': 40,
+                'stage': 'dataloaders_created',
+                'message': f'DataLoaders created with {len(dls.vocab)} classes'
             })
             
-            # Create fastai learner with proper error handling
-            try:
-                learn = vision_learner(dls, model_arch, metrics=[accuracy, error_rate])
-                
-                # Add additional metrics after successful creation
-                learn.metrics.extend([Precision(), Recall(), F1Score()])
-                
-                # Set learning rate
-                learn.lr = learning_rate
-                
-                update_training_status(model_name, {
-                    'status': 'preparing',
-                    'progress': 60,
-                    'stage': 'model_ready',
-                    'message': 'Model architecture ready for training'
-                })
-            except Exception as model_err:
-                logger.error(f"Error creating vision_learner: {model_err}")
-                # Try more basic approach for problematic architectures
-                try:
-                    # Fall back to a simpler, more reliable model
-                    from fastai.vision.all import resnet18
-                    logger.warning(f"Falling back to ResNet18 due to compatibility issues")
-                    learn = vision_learner(dls, resnet18, metrics=[accuracy, error_rate])
-                    learn.metrics.extend([Precision(), Recall(), F1Score()])
-                    learn.lr = learning_rate
-                    architecture = "ResNet18 (fallback)"
-                    
-                    update_training_status(model_name, {
-                        'status': 'preparing',
-                        'progress': 60,
-                        'stage': 'model_ready',
-                        'message': 'Using fallback model architecture due to compatibility issues'
-                    })
-                except Exception as fallback_err:
-                    logger.error(f"Even fallback model failed: {fallback_err}")
-                    raise RuntimeError(f"Cannot create model learner: {model_err}. Fallback also failed: {fallback_err}")
-        
         except Exception as e:
-            logger.error(f"Error creating model: {e}")
-            logger.error(traceback.format_exc())
+            error_msg = f"Failed to create DataLoaders: {str(e)}"
+            logger.error(error_msg)
+            print(f"ERROR: {error_msg}")
+            print(traceback.format_exc())
             update_training_status(model_name, {
                 'status': 'error',
-                'error': f"Error creating model: {str(e)}",
+                'error': error_msg,
+                'error_type': 'dataloader_creation_error'
+            })
+            return False
+            
+        # Create the model
+        update_training_status(model_name, {
+            'status': 'preparing',
+            'progress': 50,
+            'stage': 'creating_model',
+            'message': f'Creating model with architecture: {architecture}'
+        })
+        
+        try:
+            print(f"\nCreating model with architecture: {architecture}")
+            
+            # Map architecture string to the correct architecture function
+            arch_mapping = {
+                'resnet18': models.resnet18,
+                'resnet34': models.resnet34,
+                'resnet50': models.resnet50,
+                'mobile': models.mobilenet_v2,
+                'efficientnet': models.efficientnet_b0
+            }
+            
+            if architecture not in arch_mapping:
+                print(f"Warning: Unknown architecture '{architecture}', falling back to mobilenet_v2")
+                architecture = 'mobile'
+                
+            arch_fn = arch_mapping.get(architecture, models.mobilenet_v2)
+            print(f"Using model architecture function: {arch_fn.__name__}")
+            
+            # Create the learner
+            print(f"Creating vision_learner with {len(dls.vocab)} classes")
+            try:
+                learn = vision_learner(
+                    dls, 
+                    arch_fn, 
+                    metrics=[accuracy, error_rate, Precision(), Recall(), F1Score()],
+                    pretrained=True
+                )
+                print(f"Model created successfully with metrics: accuracy, error_rate, Precision, Recall, F1Score")
+            except Exception as model_err:
+                print(f"Error creating vision_learner with {arch_fn.__name__}: {model_err}")
+                print("Trying with simpler ResNet18 architecture...")
+                
+                # Fallback to resnet18 which usually works
+                learn = vision_learner(
+                    dls, 
+                    models.resnet18, 
+                    metrics=[accuracy, error_rate],
+                    pretrained=True
+                )
+                print("Fallback model created successfully with resnet18")
+                
+            # Set learning rate
+            print(f"Setting learning rate to {learning_rate}")
+            learn.lr_find()
+            learn.fit_one_cycle(1, learning_rate)
+            
+            update_training_status(model_name, {
+                'status': 'preparing',
+                'progress': 60,
+                'stage': 'model_created',
+                'message': f'Model created with architecture: {architecture}'
+            })
+            
+        except Exception as e:
+            error_msg = f"Failed to create model: {str(e)}"
+            logger.error(error_msg)
+            print(f"ERROR: {error_msg}")
+            print(traceback.format_exc())
+            update_training_status(model_name, {
+                'status': 'error',
+                'error': error_msg,
                 'error_type': 'model_creation_error'
             })
             return False
@@ -339,6 +337,11 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
         })
         
         logger.info(f"Starting training for {epochs} epochs with batch size {batch_size}")
+        print(f"\n===== STARTING TRAINING =====")
+        print(f"Model: {architecture}")
+        print(f"Dataset: {dataset_name} ({len(dls.vocab)} classes)")
+        print(f"Epochs: {epochs}, Batch size: {batch_size}")
+        print(f"Learning rate: {learning_rate}")
         
         # Custom callback to update training status
         class StatusCallback():
@@ -371,6 +374,7 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
             def before_fit(self):
                 self.training_start_time = time.time()
                 try:
+                    print("\n>> Training starting - before_fit callback")
                     update_training_status(self.model_name, {
                         'status': 'training',
                         'progress': 65,
@@ -382,6 +386,7 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
                     })
                 except Exception as e:
                     logger.error(f"Error updating status in before_fit: {e}")
+                    print(f"Error in before_fit: {e}")
                 
             def before_epoch(self):
                 try:
@@ -393,7 +398,8 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
                         self.current_epoch = epoch
                     except:
                         pass
-                        
+                    
+                    print(f"\n>> Starting epoch {epoch+1}/{self.total_epochs}")
                     # Calculate progress
                     base_progress = 65
                     freeze_progress = 5 
@@ -405,11 +411,14 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
                         fine_tune_progress = self.current_epoch * (remaining_progress / max(1, self.total_epochs))
                         progress = base_progress + freeze_progress + fine_tune_progress
                     
+                    phase = 'freeze' if self.current_epoch == 0 else 'fine_tune'
+                    print(f"Training phase: {phase}, Progress: {progress:.1f}%")
+                    
                     update_training_status(self.model_name, {
                         'status': 'training',
                         'progress': min(95, progress),
                         'stage': 'training_epoch',
-                        'phase': 'freeze' if self.current_epoch == 0 else 'fine_tune',
+                        'phase': phase,
                         'epoch': self.current_epoch + 1,
                         'total_epochs': self.total_epochs,
                         'message': f'Training epoch {self.current_epoch + 1}/{self.total_epochs}',
@@ -417,6 +426,7 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
                     })
                 except Exception as e:
                     logger.error(f"Error updating status in before_epoch: {e}")
+                    print(f"Error in before_epoch: {e}")
                 
             def after_epoch(self):
                 try:
@@ -426,6 +436,8 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
                     valid_loss = 0
                     accuracy_val = 0
                     error_rate_val = 0
+                    
+                    print(f"\n>> Completed epoch {epoch+1}/{self.total_epochs}")
                     
                     # Safely extract metrics
                     try:
@@ -440,8 +452,13 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
                                 accuracy_val = float(values[1])
                             if len(values) > 2:
                                 error_rate_val = float(values[2])
+                                
+                        print(f"Metrics - Train loss: {train_loss:.4f}, Validation loss: {valid_loss:.4f}")
+                        print(f"Accuracy: {accuracy_val:.4f} ({accuracy_val*100:.2f}%), Error rate: {error_rate_val:.4f}")
+                        
                     except Exception as metric_err:
                         logger.error(f"Error extracting metrics: {metric_err}")
+                        print(f"Error extracting metrics: {metric_err}")
                     
                     # Calculate progress percentage based on completed epochs
                     base_progress = 65
@@ -453,6 +470,8 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
                     else:
                         fine_tune_progress = (epoch + 1) * (remaining_progress / max(1, self.total_epochs))
                         progress = base_progress + freeze_progress + fine_tune_progress
+                    
+                    print(f"Training progress: {min(95, progress):.1f}%")
                     
                     # Update training status with detailed metrics
                     update_training_status(self.model_name, {
@@ -475,10 +494,12 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
                     logger.info(f"Epoch {epoch+1}/{self.total_epochs} complete. Loss: {train_loss:.4f}, Accuracy: {accuracy_val:.4f}")
                 except Exception as e:
                     logger.error(f"Error updating status in after_epoch: {e}")
+                    print(f"Error in after_epoch: {e}")
             
             def after_fit(self):
                 try:
                     # Update status when training is complete
+                    print("\n>> Training complete - after_fit callback")
                     update_training_status(self.model_name, {
                         'status': 'saving',
                         'progress': 95,
@@ -487,6 +508,7 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
                     })
                 except Exception as e:
                     logger.error(f"Error updating status in after_fit: {e}")
+                    print(f"Error in after_fit: {e}")
         
         # Register our custom callback
         status_cb = StatusCallback(model_name)
@@ -559,8 +581,8 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
                 'learning_rate': learning_rate,
                 'data_augmentation': data_augmentation,
                 'date_created': time.strftime('%Y-%m-%d %H:%M:%S'),
-                'num_classes': num_classes,
-                'class_names': class_names,
+                'num_classes': len(dls.vocab),
+                'class_names': dls.vocab,
                 'final_metrics': {
                     'loss': final_train_loss,
                     'accuracy': final_accuracy,
@@ -617,8 +639,8 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
                     'model_name': model_name,
                     'dataset': dataset_name,
                     'architecture': architecture,
-                    'num_classes': num_classes,
-                    'class_names': class_names,
+                    'num_classes': len(dls.vocab),
+                    'class_names': dls.vocab,
                     'training_time': int(time.time() - float(status_cb.training_start_time)) if hasattr(status_cb, 'training_start_time') and status_cb.training_start_time else None
                 }
             })
