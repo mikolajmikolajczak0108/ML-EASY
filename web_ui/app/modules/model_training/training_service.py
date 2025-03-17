@@ -360,31 +360,144 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
             
             start_time = time.time()
             try:
-                learn = vision_learner(
-                    dls, 
-                    arch_fn, 
-                    metrics=[accuracy, error_rate, Precision(), Recall(), F1Score()],
-                    pretrained=True
-                )
+                # Add timeout protection to prevent indefinite hanging
+                timeout_seconds = 120  # 2 minutes timeout
+                
+                # First check if we can create the model with pretrained=False to test basic functionality
+                print(f"Testing architecture {arch_fn.__name__} compatibility...")
+                test_model = None
+                try:
+                    # Set environment variable to cache models locally
+                    os.environ['TORCH_HOME'] = os.path.join(get_model_path(), 'torch_cache')
+                    print(f"TORCH_HOME set to: {os.environ['TORCH_HOME']}")
+                    
+                    # Ensure model cache directory exists
+                    os.makedirs(os.environ['TORCH_HOME'], exist_ok=True)
+                    
+                    # Network settings for better downloads
+                    # Some networks block or throttle model downloads
+                    try:
+                        # Try to force a longer timeout for downloads
+                        import urllib.request
+                        urllib.request.socket.setdefaulttimeout(180)  # 3 minute timeout
+                        print("Set default socket timeout to 180 seconds")
+                        
+                        # Check if we can access the PyTorch download server
+                        test_url = "https://download.pytorch.org/models/hub/checkpoints/"
+                        try:
+                            print(f"Testing connection to {test_url}")
+                            urllib.request.urlopen(test_url, timeout=10)
+                            print("Connection to PyTorch download server successful")
+                        except Exception as conn_err:
+                            print(f"Warning: Cannot connect to PyTorch download server: {conn_err}")
+                            print("Will attempt to use cached models if available")
+                    except Exception as network_err:
+                        print(f"Warning: Could not configure network settings: {network_err}")
+                    
+                    # Create architecture without pretrained weights
+                    test_model = arch_fn(pretrained=False)
+                    print(f"Basic architecture test passed for {arch_fn.__name__}")
+                except Exception as arch_err:
+                    print(f"Architecture test failed: {arch_err}")
+                    print(f"Detailed error: {str(arch_err)}")
+                    print(traceback.format_exc())
+                    raise ValueError(f"Architecture {arch_fn.__name__} is not compatible: {str(arch_err)}")
+                
+                # Now try to create the full vision_learner
+                print(f"Creating vision_learner with architecture: {arch_fn.__name__}")
+                
+                # Set a more restrictive set of metrics to avoid issues
+                base_metrics = [accuracy, error_rate]
+                
+                try:
+                    # First try with pretrained weights
+                    print("Attempting to create model with pretrained weights...")
+                    learn = vision_learner(
+                        dls, 
+                        arch_fn, 
+                        metrics=base_metrics,
+                        pretrained=True
+                    )
+                    print("Successfully created model with pretrained weights")
+                except Exception as pretrained_err:
+                    print(f"Error with pretrained weights: {pretrained_err}")
+                    print("Trying without pretrained weights as fallback...")
+                    
+                    # Try without pretrained weights
+                    learn = vision_learner(
+                        dls, 
+                        arch_fn, 
+                        metrics=base_metrics,
+                        pretrained=False
+                    )
+                    print("Successfully created model without pretrained weights")
+                
+                # Check if we've exceeded the timeout
+                if time.time() - start_time > timeout_seconds:
+                    raise TimeoutError(f"Model creation timed out after {timeout_seconds} seconds")
+                
                 creation_time = time.time() - start_time
                 print(f"Model created successfully in {creation_time:.2f} seconds")
-                print(f"Metrics: accuracy, error_rate, Precision, Recall, F1Score")
+                print(f"Base metrics: accuracy, error_rate")
+                
+                # Add additional metrics now that the model is created
+                try:
+                    learn.metrics.extend([Precision(), Recall(), F1Score()])
+                    print("Extended metrics added: Precision, Recall, F1Score")
+                except Exception as metrics_err:
+                    print(f"Warning: Could not add extended metrics: {metrics_err}")
+                
             except Exception as model_err:
-                print(f"Error creating vision_learner with {arch_fn.__name__}: {model_err}")
+                error_msg = str(model_err)
+                print(f"Error creating vision_learner with {arch_fn.__name__}: {error_msg}")
+                print(f"Detailed error: {traceback.format_exc()}")
+                
                 print("Trying with simpler ResNet18 architecture...")
                 
                 # Fallback to resnet18 which usually works
                 fallback_start = time.time()
-                learn = vision_learner(
-                    dls, 
-                    models.resnet18, 
-                    metrics=[accuracy, error_rate],
-                    pretrained=True
-                )
-                fallback_time = time.time() - fallback_start
-                print(f"Fallback model created successfully in {fallback_time:.2f} seconds")
-                print("Using ResNet18 with basic metrics (accuracy, error_rate)")
-                
+                try:
+                    # Set a shorter timeout for fallback
+                    fallback_timeout = 60  # 1 minute timeout
+                    
+                    learn = vision_learner(
+                        dls, 
+                        models.resnet18, 
+                        metrics=[accuracy, error_rate],
+                        pretrained=True
+                    )
+                    
+                    # Check if we've exceeded the timeout
+                    if time.time() - fallback_start > fallback_timeout:
+                        raise TimeoutError(f"Fallback model creation timed out after {fallback_timeout} seconds")
+                    
+                    fallback_time = time.time() - fallback_start
+                    print(f"Fallback model created successfully in {fallback_time:.2f} seconds")
+                    print("Using ResNet18 with basic metrics (accuracy, error_rate)")
+                    
+                except Exception as fallback_err:
+                    print(f"CRITICAL ERROR: Fallback model also failed: {fallback_err}")
+                    print(f"Detailed error: {traceback.format_exc()}")
+                    
+                    # Ultimate fallback - try with no pretrained weights at all
+                    print("Attempting last resort: ResNet18 without pretrained weights")
+                    try:
+                        learn = vision_learner(
+                            dls, 
+                            models.resnet18, 
+                            metrics=[accuracy],
+                            pretrained=False
+                        )
+                        print("Created ResNet18 without pretrained weights successfully")
+                    except Exception as last_resort_err:
+                        print(f"All fallback attempts failed: {last_resort_err}")
+                        update_training_status(model_name, {
+                            'status': 'error',
+                            'error': f"Failed to create model: {error_msg}. Fallback also failed: {str(fallback_err)}",
+                            'error_type': 'model_creation_error'
+                        })
+                        return False
+            
             # Set learning rate
             print(f"Setting learning rate to {learning_rate}")
             learn.lr = learning_rate
