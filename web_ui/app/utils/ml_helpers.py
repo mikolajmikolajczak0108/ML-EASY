@@ -155,72 +155,88 @@ def load_model(model_name):
     Returns:
         fastai.Learner: Loaded model
     """
-    # Path to saved models
-    models_dir = current_app.config['MODEL_PATH']
-    saved_models_dir = os.path.join(models_dir, 'saved_models')
-    model_dir = os.path.normpath(os.path.join(saved_models_dir, model_name))
+    # Import here to avoid triggering Flask auto-reload
+    # when PyTorch loads many internal modules
+    import sys
+    old_stdout = sys.stdout
+    old_stderr = sys.stderr
+    sys.stdout = None
+    sys.stderr = None
     
-    logging.info(f"Attempting to load model: {model_name} from path: {model_dir}")
-    
-    # Check if model exists as a directory
-    if os.path.exists(model_dir) and os.path.isdir(model_dir):
-        # Look for export.pkl or model.pkl in the directory
-        export_path = os.path.join(model_dir, 'export.pkl')
-        model_pkl_path = os.path.join(model_dir, 'model.pkl')
-        
-        if os.path.exists(export_path):
-            model_path = export_path
-            logging.info(f"Found export.pkl at: {model_path}")
-        elif os.path.exists(model_pkl_path):
-            model_path = model_pkl_path
-            logging.info(f"Found model.pkl at: {model_path}")
-        else:
-            # Check for any .pkl file
-            pkl_files = [f for f in os.listdir(model_dir) if f.endswith('.pkl')]
-            if pkl_files:
-                model_path = os.path.join(model_dir, pkl_files[0])
-                logging.info(f"Found PKL file at: {model_path}")
-            else:
-                logging.error(f"No pickle model file found in directory: {model_dir}")
-                return None
-    else:
-        # Check for model files directly
-        pkl_path = os.path.join(saved_models_dir, f"{model_name}.pkl")
-        if os.path.exists(pkl_path):
-            model_path = pkl_path
-            logging.info(f"Found model at: {model_path}")
-        else:
-            logging.error(f"Model {model_name} not found in {saved_models_dir}")
-            return None
-    
-    # Load the model using fastai
     try:
-        # First try to check if we have read access
-        try:
-            if os.path.isdir(model_path):
-                os.listdir(model_path)  # Check if we can read the directory
-            else:
-                with open(model_path, 'rb') as f:
-                    pass  # Just check if we can open the file
-        except PermissionError as pe:
-            logging.error(f"Permission denied when accessing model path: {model_path}")
-            raise PermissionError(f"Cannot access model file/directory: {pe}")
+        # Path to saved models
+        models_dir = current_app.config['MODEL_PATH']
+        saved_models_dir = os.path.join(models_dir, 'saved_models')
+        model_dir = os.path.normpath(os.path.join(saved_models_dir, model_name))
+        
+        logging.info(f"Attempting to load model: {model_name} from path: {model_dir}")
+        
+        # Check if model exists as a directory
+        if os.path.exists(model_dir) and os.path.isdir(model_dir):
+            # Look for export.pkl or model.pkl in the directory
+            export_path = os.path.join(model_dir, 'export.pkl')
+            model_pkl_path = os.path.join(model_dir, 'model.pkl')
             
-        # Temporarily suppress the pickle warning
-        import warnings
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=UserWarning, 
-                                   message="load_learner` uses Python's insecure pickle module")
-            from fastai.learner import load_learner
-            logging.info(f"Loading FastAI model from: {model_path}")
-            model = load_learner(model_path)
-            return model
-    except PermissionError as pe:
-        logging.error(f"Permission denied when loading model: {pe}")
-        return None
-    except Exception as e:
-        logging.error(f"Error loading fastai model: {e}")
-        return None
+            if os.path.exists(export_path):
+                model_path = export_path
+                logging.info(f"Found export.pkl at: {model_path}")
+            elif os.path.exists(model_pkl_path):
+                model_path = model_pkl_path
+                logging.info(f"Found model.pkl at: {model_path}")
+            else:
+                # Check for any .pkl file
+                pkl_files = [f for f in os.listdir(model_dir) if f.endswith('.pkl')]
+                if pkl_files:
+                    model_path = os.path.join(model_dir, pkl_files[0])
+                    logging.info(f"Found PKL file at: {model_path}")
+                else:
+                    logging.error(f"No pickle model file found in directory: {model_dir}")
+                    return None
+        else:
+            # Check for model files directly
+            pkl_path = os.path.join(saved_models_dir, f"{model_name}.pkl")
+            if os.path.exists(pkl_path):
+                model_path = pkl_path
+                logging.info(f"Found model at: {model_path}")
+            else:
+                logging.error(f"Model {model_name} not found in {saved_models_dir}")
+                return None
+        
+        # Load the model using fastai
+        try:
+            # First try to check if we have read access
+            try:
+                if os.path.isdir(model_path):
+                    os.listdir(model_path)  # Check if we can read the directory
+                else:
+                    with open(model_path, 'rb') as f:
+                        pass  # Just check if we can open the file
+            except PermissionError as pe:
+                logging.error(f"Permission denied when accessing model path: {model_path}")
+                raise PermissionError(f"Cannot access model file/directory: {pe}")
+                
+            # Temporarily suppress the pickle warning
+            import warnings
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=UserWarning, 
+                                      message="load_learner` uses Python's insecure pickle module")
+                
+                # Load the model quietly to avoid triggering Flask watchdog
+                from fastai.learner import load_learner
+                logging.info(f"Loading FastAI model from: {model_path}")
+                model = load_learner(model_path)
+                
+                return model
+        except PermissionError as pe:
+            logging.error(f"Permission denied when loading model: {pe}")
+            return None
+        except Exception as e:
+            logging.error(f"Error loading fastai model: {e}")
+            return None
+    finally:
+        # Restore stdout and stderr
+        sys.stdout = old_stdout
+        sys.stderr = old_stderr
 
 
 def create_datablock(dataset_path, img_size=224, batch_size=16):

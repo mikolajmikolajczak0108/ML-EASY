@@ -234,20 +234,40 @@
         }
     });
     
+    // Function to handle fetch with retries
+    async function fetchWithRetry(url, options, maxRetries = 3) {
+        let retries = 0;
+        while (retries < maxRetries) {
+            try {
+                const response = await fetch(url, options);
+                return response;
+            } catch (error) {
+                if (retries === maxRetries - 1) {
+                    throw error;
+                }
+                retries++;
+                console.log(`Fetch failed, retrying (${retries}/${maxRetries})...`);
+                // Wait before retrying (exponential backoff)
+                await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, retries)));
+            }
+        }
+    }
+    
     // Single test form submission
-    document.getElementById('single-test-form').addEventListener('submit', function(event) {
+    document.getElementById('single-test-form').addEventListener('submit', async function(event) {
         event.preventDefault();
         
         const formData = new FormData(this);
         const loadingModal = new bootstrap.Modal(document.getElementById('loading-modal'));
         loadingModal.show();
         
-        fetch('/test/classify', {
-            method: 'POST',
-            body: formData
-        })
-        .then(response => response.json())
-        .then(data => {
+        try {
+            const response = await fetchWithRetry('/test/classify', {
+                method: 'POST',
+                body: formData
+            });
+            
+            const data = await response.json();
             loadingModal.hide();
             
             if (data.success) {
@@ -289,30 +309,30 @@
                     }
                 });
             } else {
-                // If not a TensorFlow error, show regular error
+                // Show error
                 alert('Error: ' + data.error);
             }
-        })
-        .catch(error => {
+        } catch (error) {
             loadingModal.hide();
-            alert('An error occurred: ' + error);
-        });
+            alert('Connection error: ' + error.message + '. Please try again in a few moments.');
+        }
     });
     
     // Batch test form submission
-    document.getElementById('batch-test-form').addEventListener('submit', function(event) {
+    document.getElementById('batch-test-form').addEventListener('submit', async function(event) {
         event.preventDefault();
         
         const formData = new FormData(this);
         const loadingModal = new bootstrap.Modal(document.getElementById('loading-modal'));
         loadingModal.show();
         
-        fetch('/test/batch', {
-            method: 'POST',
-            body: formData
-        })
-        .then(response => response.json())
-        .then(data => {
+        try {
+            const response = await fetchWithRetry('/test/batch', {
+                method: 'POST',
+                body: formData
+            });
+            
+            const data = await response.json();
             loadingModal.hide();
             
             if (data.success) {
@@ -320,14 +340,13 @@
                 // (implementation will be completed in the next phase)
                 alert('Batch processing completed successfully!');
             } else {
-                // If not a TensorFlow error, show regular error
+                // Show error
                 alert('Error: ' + data.error);
             }
-        })
-        .catch(error => {
+        } catch (error) {
             loadingModal.hide();
-            alert('An error occurred: ' + error);
-        });
+            alert('Connection error: ' + error.message + '. Please try again in a few moments.');
+        }
     });
 </script>
 {% endblock %} 
