@@ -11,78 +11,31 @@ from flask import (
 )
 from werkzeug.utils import secure_filename
 
-# Konfiguracja loggera
+# Import modular services
+from .utils import get_dataset_path, get_model_path, allowed_file
+from .dataset_service import (
+    get_datasets, get_dataset_stats, 
+    create_dataset as create_dataset_service, 
+    delete_dataset, create_example_dataset
+)
+from .training_service import (
+    start_model_training, get_training_status, get_models
+)
+
+# Initialize logger
 logger = logging.getLogger(__name__)
 
-# Cache dla danych
+# Cache variables (for dataset info)
 _dataset_info_cache = {}
 _class_image_cache = {}
-_cache_timeout = 60  # Cache timeout in seconds (refresh every minute)
-
-# Lista dozwolonych rozszerzeń - stała zamiast pobierania z config
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'mp4', 'mov'}
-
-# Ścieżki do katalogów (będą uzupełniane przy pierwszym użyciu)
-_BASE_PATH = None
-_DATASET_PATH = None
-_MODEL_PATH = None
-_UPLOAD_PATH = None
-
-def get_dataset_path():
-    """Get the dataset path, ensuring it exists within an application context."""
-    global _DATASET_PATH, _BASE_PATH
-    if _DATASET_PATH is None:
-        _BASE_PATH = os.path.dirname(os.path.dirname(os.path.dirname(
-            os.path.abspath(__file__))))
-        _DATASET_PATH = os.path.join(_BASE_PATH, 'datasets')
-        os.makedirs(_DATASET_PATH, exist_ok=True)
-    return _DATASET_PATH
-
-def get_model_path():
-    """Get the model path, ensuring it exists within an application context."""
-    global _MODEL_PATH, _BASE_PATH
-    if _MODEL_PATH is None:
-        if _BASE_PATH is None:
-            _BASE_PATH = os.path.dirname(os.path.dirname(os.path.dirname(
-                os.path.abspath(__file__))))
-        _MODEL_PATH = os.path.join(_BASE_PATH, 'models')
-        os.makedirs(_MODEL_PATH, exist_ok=True)
-    return _MODEL_PATH
-
-def get_upload_path():
-    """Get the upload path, ensuring it exists within an application context."""
-    global _UPLOAD_PATH, _BASE_PATH
-    if _UPLOAD_PATH is None:
-        if _BASE_PATH is None:
-            _BASE_PATH = os.path.dirname(os.path.dirname(os.path.dirname(
-                os.path.abspath(__file__))))
-        _UPLOAD_PATH = os.path.join(_BASE_PATH, 'uploads')
-        os.makedirs(_UPLOAD_PATH, exist_ok=True)
-    return _UPLOAD_PATH
-
-# Funkcja do sprawdzania rozszerzeń plików 
-def allowed_file(filename):
-    """Check if a file has an allowed extension."""
-    if not filename or not isinstance(filename, str):
-        return False
-    
-    # Make sure filename has an extension
-    if '.' not in filename:
-        return False
-    
-    # Get the last part after the dot as the extension
-    try:
-        ext = filename.rsplit('.', 1)[1].lower()
-        return ext in ALLOWED_EXTENSIONS
-    except (IndexError, AttributeError):
-        return False
+_cache_timeout = 300  # 5 minutes
 
 # Definicja blueprintu
 model_training_bp = Blueprint(
     'model_training', 
     __name__, 
     url_prefix='/train',
-    template_folder='templates/model_training'
+    template_folder='templates'
 )
 
 
@@ -98,26 +51,73 @@ def index():
         return str(e), 500
 
 
-@model_training_bp.route('/new-model')
+@model_training_bp.route('/new_model', methods=['GET', 'POST'])
 def new_model():
     """Render the new model page."""
     try:
-        logger.info("Rendering new_model page")
-        return render_template('model_training/new_model.html')
+        # Get available datasets
+        datasets = get_datasets()
+        
+        # Handle datasets format - could be list of dicts or list of strings
+        if datasets and isinstance(datasets[0], dict):
+            # Keep the original format for templates that expect it
+            pass
+        else:
+            # Convert strings to dict format for backwards compatibility
+            datasets = [{'name': d} for d in datasets]
+        
+        # Define available model architectures
+        model_architectures = [
+            "ResNet50", "MobileNetV2", "EfficientNetB0", 
+            "VGG16", "InceptionV3", "DenseNet121"
+        ]
+        
+        logger.info("Rendering new model template")
+        return render_template(
+            'model_training/new_model.html',
+            datasets=datasets,
+            model_architectures=model_architectures
+        )
     except Exception as e:
-        logger.error(f"Error rendering new_model template: {e}")
+        logger.error(f"Error rendering new model template: {e}")
         logger.error(traceback.format_exc())
         return str(e), 500
 
 
-@model_training_bp.route('/finetune')
+@model_training_bp.route('/finetune', methods=['GET', 'POST'])
 def finetune():
-    """Render the finetune page."""
+    """Render the finetune model page."""
     try:
-        logger.info("Rendering finetune page")
-        return render_template('model_training/finetune.html')
+        # Get available datasets
+        datasets = get_datasets()
+        
+        # Handle datasets format - could be list of dicts or list of strings
+        if datasets and isinstance(datasets[0], dict):
+            # Keep the original format for templates that expect it
+            pass
+        else:
+            # Convert strings to dict format for backwards compatibility
+            datasets = [{'name': d} for d in datasets]
+        
+        # Get available pre-trained models
+        models = get_models()
+        
+        # If no saved models, offer pre-trained options
+        if not models:
+            models = [
+                "ResNet50-ImageNet", "MobileNetV2-ImageNet", 
+                "EfficientNetB0-ImageNet", "VGG16-ImageNet", 
+                "InceptionV3-ImageNet"
+            ]
+        
+        logger.info("Rendering finetune model template")
+        return render_template(
+            'model_training/finetune.html', 
+            datasets=datasets,
+            models=models
+        )
     except Exception as e:
-        logger.error(f"Error rendering finetune template: {e}")
+        logger.error(f"Error rendering finetune model template: {e}")
         logger.error(traceback.format_exc())
         return str(e), 500
 
@@ -126,8 +126,6 @@ def finetune():
 def datasets():
     """Render the datasets page."""
     logger.info("Rendering datasets page")
-    # Get all datasets
-    datasets_path = get_dataset_path()
     
     # Use cached data if available and not expired
     cache_key = 'all_datasets'
@@ -135,10 +133,20 @@ def datasets():
         cache_time, dataset_list = _dataset_info_cache[cache_key]
         if time.time() - cache_time < _cache_timeout:
             try:
-                logger.debug(f"Using cached dataset list with {len(dataset_list)} items")
+                logger.debug(
+                    f"Using cached dataset list with {len(dataset_list)} items"
+                )
+                
+                # Handle both formats - list of dictionaries or list of strings
+                if dataset_list and isinstance(dataset_list[0], dict):
+                    datasets_names = [d['name'] for d in dataset_list]
+                else:
+                    # If cached list contains strings directly
+                    datasets_names = dataset_list
+                
                 return render_template(
                     'model_training/datasets.html', 
-                    datasets=[d['name'] for d in dataset_list]
+                    datasets=datasets_names
                 )
             except Exception as e:
                 logger.error(f"Error rendering datasets template from cache: {e}")
@@ -146,41 +154,22 @@ def datasets():
                 return str(e), 500
     
     # If not in cache or expired, get fresh data
-    dataset_list = []
-    dataset_names = []
-    
     try:
-        if os.path.exists(datasets_path):
-            logger.debug(f"Scanning dataset path: {datasets_path}")
-            for dataset_name in os.listdir(datasets_path):
-                dataset_path = os.path.join(datasets_path, dataset_name)
-                if os.path.isdir(dataset_path):
-                    # Get class count
-                    class_count = 0
-                    classes = []
-                    for class_name in os.listdir(dataset_path):
-                        class_path = os.path.join(dataset_path, class_name)
-                        if os.path.isdir(class_path):
-                            class_count += 1
-                            classes.append(class_name)
-                    
-                    dataset_list.append({
-                        'name': dataset_name,
-                        'class_count': class_count,
-                        'classes': classes
-                    })
-                    dataset_names.append(dataset_name)
-            
-            logger.debug(f"Found {len(dataset_list)} datasets")
-        else:
-            logger.warning(f"Dataset path doesn't exist: {datasets_path}")
+        datasets_list = get_datasets()
         
         # Cache the results
-        _dataset_info_cache[cache_key] = (time.time(), dataset_list)
+        _dataset_info_cache[cache_key] = (time.time(), datasets_list)
+        
+        # Handle both formats - list of dictionaries or list of strings
+        if datasets_list and isinstance(datasets_list[0], dict):
+            datasets_names = [d['name'] for d in datasets_list]
+        else:
+            # If get_datasets returns a list of strings directly
+            datasets_names = datasets_list
         
         return render_template(
             'model_training/datasets.html', 
-            datasets=dataset_names
+            datasets=datasets_names
         )
     except Exception as e:
         logger.error(f"Error processing datasets: {e}")
@@ -190,62 +179,42 @@ def datasets():
 
 @model_training_bp.route('/datasets/new', methods=['GET', 'POST'])
 def create_dataset():
-    """Create a new dataset."""
-    if request.method == 'GET':
-        logger.info("Rendering new_dataset page")
-        try:
-            return render_template('model_training/new_dataset.html')
-        except Exception as e:
-            logger.error(f"Error rendering new_dataset template: {e}")
-            logger.error(traceback.format_exc())
-            return str(e), 500
-        
-    # Process POST request to create a dataset
+    """Render the create dataset page or handle dataset creation."""
     try:
-        logger.info("Processing new dataset creation")
-        dataset_name = request.form.get('dataset_name')
-        if not dataset_name:
-            logger.warning("Dataset name is required but not provided")
+        # Handle dataset creation
+        if request.method == 'POST':
+            dataset_name = request.form.get('dataset_name')
+            num_classes = int(request.form.get('num_classes', 2))
+            class_names = [
+                request.form.get(f'class_{i}', f'class_{i}') 
+                for i in range(1, num_classes+1)
+            ]
+            
+            # Create the dataset
+            create_dataset_service(dataset_name, num_classes, class_names)
+            
             return jsonify({
-                'success': False,
-                'error': 'Dataset name is required'
-            }), 400
-            
-        # Create dataset directory
-        dataset_path = os.path.join(
-            get_dataset_path(), dataset_name)
-        if os.path.exists(dataset_path):
-            logger.warning(f"Dataset already exists: {dataset_name}")
-            return jsonify({
-                'success': False,
-                'error': 'Dataset with this name already exists'
-            }), 400
-            
-        os.makedirs(dataset_path, exist_ok=True)
+                'success': True,
+                'dataset_name': dataset_name,
+                'num_classes': num_classes,
+                'redirect': url_for(
+                    'model_training.edit_dataset', 
+                    dataset_name=dataset_name
+                )
+            })
         
-        # Get number of classes
-        num_classes = int(request.form.get('num_classes', 2))
-        class_names = request.form.getlist('class_names[]')
+        # Render the create dataset form
+        return render_template('model_training/create_dataset.html')
         
-        # Create folders for each class
-        for i in range(num_classes):
-            class_name = class_names[i] if i < len(class_names) else f"class_{i+1}"
-            os.makedirs(os.path.join(dataset_path, class_name), exist_ok=True)
-            
-        logger.info(f"Dataset created successfully: {dataset_name} with {num_classes} classes")
-        return jsonify({
-            'success': True,
-            'dataset_name': dataset_name,
-            'num_classes': num_classes,
-            'redirect': url_for('model_training.edit_dataset', dataset_name=dataset_name)
-        })
     except Exception as e:
-        logger.error(f"Error creating dataset: {e}")
+        logger.error(f"Error handling create_dataset: {e}")
         logger.error(traceback.format_exc())
-        return jsonify({
-            'success': False,
-            'error': f'Error creating dataset: {str(e)}'
-        }), 500
+        if request.method == 'POST':
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500
+        return str(e), 500
 
 
 @model_training_bp.route('/datasets/<dataset_name>/edit')
@@ -314,9 +283,11 @@ def edit_dataset(dataset_name):
         logger.info(f"Found {len(classes)} classes")
         
         # Render template
-        return render_template('model_training/edit_dataset.html', 
-                             dataset_name=dataset_name, 
-                             classes=classes)
+        return render_template(
+            'model_training/edit_dataset.html', 
+            dataset_name=dataset_name, 
+            classes=classes
+        )
     
     except Exception as e:
         # Detailed error logging
@@ -561,38 +532,18 @@ def dataset_stats(dataset_name):
     """Get statistics about a dataset, including class counts."""
     logger.info(f"Getting stats for dataset: {dataset_name}")
     try:
-        dataset_dir = os.path.join(get_dataset_path(), dataset_name)
+        dataset_info = get_dataset_stats(dataset_name)
         
-        if not os.path.exists(dataset_dir):
-            logger.warning(f"Dataset not found: {dataset_name}")
+        if not dataset_info:
             return jsonify({
                 'success': False,
-                'error': 'Dataset not found'
+                'error': f'Dataset {dataset_name} not found'
             }), 404
             
-        class_counts = {}
-        total_images = 0
-        
-        # Get all classes in the dataset
-        for class_name in os.listdir(dataset_dir):
-            class_dir = os.path.join(dataset_dir, class_name)
-            if os.path.isdir(class_dir):
-                # Count images in this class
-                image_count = 0
-                for f in os.listdir(class_dir):
-                    if os.path.isfile(os.path.join(class_dir, f)) and allowed_file(f):
-                        image_count += 1
-                
-                class_counts[class_name] = image_count
-                total_images += image_count
-        
-        logger.debug(f"Stats for dataset {dataset_name}: {len(class_counts)} classes, {total_images} images")
         return jsonify({
             'success': True,
             'dataset_name': dataset_name,
-            'total_images': total_images,
-            'class_count': len(class_counts),
-            'class_counts': class_counts
+            'stats': dataset_info
         })
     except Exception as e:
         logger.error(f"Error getting dataset stats: {e}")
@@ -617,11 +568,23 @@ def get_class_images(dataset_name, class_name):
                 'error': 'Class not found'
             }), 404
             
+        # Check cache first
+        cache_key = f'class_{dataset_name}_{class_name}'
+        cache_entry = _class_image_cache.get(cache_key)
+        if cache_entry:
+            cache_time, images = cache_entry
+            if time.time() - cache_time < _cache_timeout:
+                return jsonify({
+                    'success': True,
+                    'dataset_name': dataset_name,
+                    'class_name': class_name,
+                    'images': images
+                })
+                
+        # Get all images in the class directory
         images = []
-        
         for filename in os.listdir(class_dir):
-            file_path = os.path.join(class_dir, filename)
-            if os.path.isfile(file_path) and allowed_file(filename):
+            if os.path.isfile(os.path.join(class_dir, filename)) and allowed_file(filename):
                 # Create a URL for the image using our dataset_files route
                 image_url = url_for('model_training.dataset_files', 
                                    filename=f'{dataset_name}/{class_name}/{filename}')
@@ -630,13 +593,14 @@ def get_class_images(dataset_name, class_name):
                     'filename': filename,
                     'url': image_url
                 })
+                
+        # Cache the result
+        _class_image_cache[cache_key] = (time.time(), images)
         
-        logger.debug(f"Found {len(images)} images for class {class_name}")
         return jsonify({
             'success': True,
-            'class_name': class_name,
             'dataset_name': dataset_name,
-            'image_count': len(images),
+            'class_name': class_name,
             'images': images
         })
     except Exception as e:
@@ -655,11 +619,36 @@ def dataset_files(filename):
     return send_from_directory(get_dataset_path(), filename)
 
 
-@model_training_bp.route('/datasets/example')
+@model_training_bp.route('/datasets/example', methods=['GET', 'POST'])
 def example_datasets():
-    """Render the example datasets page."""
-    logger.info("Rendering example datasets page")
+    """Render the example datasets page or handle dataset downloads."""
     try:
+        # Handle dataset download requests
+        if request.method == 'POST':
+            dataset_name = request.form.get('dataset_name')
+            if not dataset_name:
+                return jsonify({
+                    'success': False,
+                    'error': 'Dataset name is required'
+                }), 400
+                
+            # Create example dataset with real images
+            logger.info(f"Creating example dataset with images: {dataset_name}")
+            
+            # Create the example dataset
+            created_dataset_name, classes = create_example_dataset(dataset_name, dataset_name)
+                
+            logger.info(f"Started downloading images for dataset: {created_dataset_name}")
+            
+            # Create a response for the client indicating success
+            return jsonify({
+                'success': True,
+                'message': f'Dataset {created_dataset_name} created and downloading images',
+                'redirect': url_for('model_training.edit_dataset', dataset_name=created_dataset_name)
+            })
+        
+        # Handle GET requests - show the example datasets page
+        logger.info("Rendering example datasets page")
         # Sample data for example datasets
         datasets = {
             "Pet Animals": "/static/example_datasets/pets.zip",
@@ -668,8 +657,13 @@ def example_datasets():
         }
         return render_template('model_training/example_datasets.html', datasets=datasets)
     except Exception as e:
-        logger.error(f"Error rendering example_datasets template: {e}")
+        logger.error(f"Error handling example_datasets: {e}")
         logger.error(traceback.format_exc())
+        if request.method == 'POST':
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500
         return str(e), 500
 
 
@@ -682,4 +676,139 @@ def webscrape():
     except Exception as e:
         logger.error(f"Error rendering webscrape template: {e}")
         logger.error(traceback.format_exc())
-        return str(e), 500 
+        return str(e), 500
+
+
+@model_training_bp.route('/tutorial')
+def ml_tutorial():
+    """Render the machine learning tutorial page."""
+    try:
+        logger.info("Rendering ML tutorial page")
+        return render_template('model_training/ml_tutorial.html')
+    except Exception as e:
+        logger.error(f"Error rendering ML tutorial template: {e}")
+        logger.error(traceback.format_exc())
+        return str(e), 500
+
+
+@model_training_bp.route('/datasets/<dataset_name>/delete', methods=['POST'])
+def delete_dataset_route(dataset_name):
+    """Delete a dataset."""
+    logger.info(f"Deleting dataset: {dataset_name}")
+    try:
+        success = delete_dataset(dataset_name)
+        
+        if not success:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to delete dataset'
+            }), 500
+            
+        logger.info(f"Dataset deleted successfully: {dataset_name}")
+        return jsonify({
+            'success': True,
+            'redirect': url_for('model_training.datasets')
+        })
+    except Exception as e:
+        logger.error(f"Error deleting dataset: {e}")
+        logger.error(traceback.format_exc())
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@model_training_bp.route('/models/train', methods=['POST'])
+def train_model():
+    """Handle model training request."""
+    try:
+        # Get form data
+        model_name = request.form.get('model_name')
+        dataset_name = request.form.get('dataset')
+        architecture = request.form.get('architecture')
+        
+        # Debug logging to see what we're receiving
+        logger.debug(f"Training form data: {request.form}")
+        
+        # Validate required fields
+        if not model_name:
+            logger.error("Missing model_name field")
+            return jsonify({'success': False, 'error': 'Model name is required'}), 400
+            
+        if not dataset_name:
+            logger.error("Missing dataset field")
+            return jsonify({'success': False, 'error': 'Dataset is required'}), 400
+            
+        if not architecture:
+            logger.error("Missing architecture field")
+            return jsonify({'success': False, 'error': 'Architecture is required'}), 400
+        
+        # Get optional fields with defaults
+        try:
+            epochs = int(request.form.get('epochs', 10))
+        except (ValueError, TypeError):
+            epochs = 10
+            
+        try:
+            batch_size = int(request.form.get('batch_size', 32))
+        except (ValueError, TypeError):
+            batch_size = 32
+            
+        try:
+            learning_rate = float(request.form.get('learning_rate', 0.001))
+        except (ValueError, TypeError):
+            learning_rate = 0.001
+            
+        data_augmentation = request.form.get('use_augmentation') == 'on'
+        
+        # Check if dataset exists
+        dataset_path = os.path.join(get_dataset_path(), dataset_name)
+        if not os.path.exists(dataset_path):
+            return jsonify({
+                'success': False,
+                'error': f'Dataset {dataset_name} not found'
+            }), 404
+            
+        # Check if model name already exists
+        model_dir = os.path.join(get_model_path(), 'saved_models', model_name)
+        if os.path.exists(model_dir):
+            return jsonify({
+                'success': False,
+                'error': f'Model {model_name} already exists'
+            }), 400
+            
+        # Start the training
+        start_model_training(
+            model_name, dataset_name, architecture, 
+            epochs, batch_size, learning_rate, data_augmentation
+        )
+        
+        logger.info(f"Started training thread for model: {model_name}")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Training started for model {model_name}',
+            'model_name': model_name
+        })
+    except Exception as e:
+        logger.error(f"Error starting model training: {e}")
+        logger.error(traceback.format_exc())
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@model_training_bp.route('/models/<model_name>/status')
+def model_status(model_name):
+    """Get the current status of a model's training."""
+    try:
+        status = get_training_status(model_name)
+        return jsonify(status)
+    except Exception as e:
+        logger.error(f"Error getting model status: {e}")
+        logger.error(traceback.format_exc())
+        return jsonify({
+            'status': 'error',
+            'error': str(e)
+        }), 500 
