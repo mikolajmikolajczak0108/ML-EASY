@@ -15,6 +15,11 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
                     learning_rate, data_augmentation):
     """Background task to train a machine learning model."""
     try:
+        # Extract dataset name if it's in dictionary format
+        if isinstance(dataset_name, dict) and 'name' in dataset_name:
+            dataset_name = dataset_name['name']
+            logger.info(f"Extracted dataset name from dictionary: {dataset_name}")
+            
         logger.info(f"Started training model: {model_name} with dataset: {dataset_name}")
         
         # Simulate training steps with appropriate logging
@@ -170,6 +175,11 @@ def start_model_training(model_name, dataset_name, architecture, epochs, batch_s
                         learning_rate, data_augmentation):
     """Start training a model in a background thread."""
     try:
+        # Extract dataset name if it's in dictionary format
+        if isinstance(dataset_name, dict) and 'name' in dataset_name:
+            dataset_name = dataset_name['name']
+            logger.info(f"Extracted dataset name from dictionary: {dataset_name}")
+            
         # Create initial status
         update_training_status(model_name, {
             'status': 'initializing',

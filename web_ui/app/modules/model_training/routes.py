@@ -10,6 +10,7 @@ from flask import (
     redirect, url_for, send_from_directory
 )
 from werkzeug.utils import secure_filename
+import json
 
 # Import modular services
 from .utils import get_dataset_path, get_model_path, allowed_file
@@ -738,6 +739,16 @@ def train_model():
         if not dataset_name:
             logger.error("Missing dataset field")
             return jsonify({'success': False, 'error': 'Dataset is required'}), 400
+            
+        # Extract dataset name if it's in JSON format (coming from form)
+        try:
+            dataset_dict = json.loads(dataset_name)
+            if isinstance(dataset_dict, dict) and 'name' in dataset_dict:
+                dataset_name = dataset_dict['name']
+                logger.info(f"Extracted dataset name from JSON: {dataset_name}")
+        except (json.JSONDecodeError, TypeError):
+            # Not JSON format, keep as is
+            pass
             
         if not architecture:
             logger.error("Missing architecture field")
