@@ -1,13 +1,19 @@
 // Model Training JS
 
 $(document).ready(function() {
+    console.log("Model training JS loaded");
+    
     // Training form submission
     $('.model-training-form').on('submit', function(e) {
+        console.log("Form submitted");
         e.preventDefault();
         const form = $(this);
         const submitButton = form.find('button[type="submit"]');
         const submitButtonText = submitButton.html();
         const alertContainer = $('#alertContainer');
+        
+        console.log("Form action:", form.attr('action'));
+        console.log("Form method:", form.attr('method'));
         
         // Update UI to show loading
         submitButton.prop('disabled', true);
@@ -20,6 +26,7 @@ $(document).ready(function() {
             method: form.attr('method'),
             data: form.serialize(),
             success: function(response) {
+                console.log("AJAX success:", response);
                 if (response.success) {
                     // Show success message
                     alertContainer.html(
@@ -31,11 +38,37 @@ $(document).ready(function() {
                     
                     // If there's a redirect URL, redirect after a short delay
                     if (response.redirect) {
+                        console.log("Redirecting to:", response.redirect);
+                        
+                        // Show redirect message
+                        alertContainer.append(
+                            `<div class="mt-2 text-info">
+                                <i class="fas fa-circle-notch fa-spin me-2"></i>
+                                Redirecting to training status page...
+                            </div>`
+                        );
+                        
+                        // Redirect with longer delay and fallback
                         setTimeout(function() {
-                            window.location.href = response.redirect;
-                        }, 1500);
+                            try {
+                                window.location.href = response.redirect;
+                            } catch (e) {
+                                console.error("Redirect error:", e);
+                                // Fallback to hardcoded URL if there's an issue
+                                window.location.href = "/train/trainings";
+                            }
+                        }, 2500);
+                        
+                        // Additional fallback if timeout doesn't trigger
+                        setTimeout(function() {
+                            if (window.location.href.indexOf("/train/trainings") === -1) {
+                                console.log("Fallback redirect triggered");
+                                window.location.href = "/train/trainings";
+                            }
+                        }, 5000);
                     }
                 } else {
+                    console.log("Form submission failed:", response.error);
                     // Show error message
                     alertContainer.html(
                         `<div class="alert alert-danger alert-dismissible fade show" role="alert">
@@ -49,7 +82,9 @@ $(document).ready(function() {
                     submitButton.html(submitButtonText);
                 }
             },
-            error: function(xhr) {
+            error: function(xhr, status, error) {
+                console.error("AJAX error:", status, error);
+                console.error("Response:", xhr.responseText);
                 let errorMessage = 'An error occurred while starting the training.';
                 
                 // Try to parse error message from response

@@ -107,6 +107,8 @@
 {% endblock %}
 
 {% block scripts %}
+<!-- Make sure jQuery is loaded first -->
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <!-- Include the model training JS file -->
 <script src="{{ url_for('static', filename='js/model_training.js') }}"></script>
 {% endblock %} 
