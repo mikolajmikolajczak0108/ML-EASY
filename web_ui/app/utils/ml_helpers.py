@@ -202,6 +202,28 @@ def load_model(model_name):
                 logging.error(f"Model {model_name} not found in {saved_models_dir}")
                 return None
         
+        # Validate pickle file integrity
+        try:
+            # Check file size
+            file_size = os.path.getsize(model_path)
+            if file_size < 1000:  # Arbitrary small size that's too small for a model
+                logging.error(f"Model file is too small ({file_size} bytes), likely corrupted")
+                return None
+                
+            # Check pickle header - valid pickle files start with specific bytes
+            with open(model_path, 'rb') as f:
+                header = f.read(4)
+                # Python 3 pickle protocol markers
+                valid_headers = [b'\x80\x03', b'\x80\x04', b'\x80\x05']
+                valid_pickle = any(header.startswith(h) for h in valid_headers)
+                
+                if not valid_pickle:
+                    logging.error(f"Model file doesn't have a valid pickle header")
+                    return None
+        except Exception as e:
+            logging.error(f"Error validating model file: {e}")
+            return None
+        
         # Load the model using fastai
         try:
             # First try to check if we have read access
@@ -224,9 +246,33 @@ def load_model(model_name):
                 # Load the model quietly to avoid triggering Flask watchdog
                 from fastai.learner import load_learner
                 logging.info(f"Loading FastAI model from: {model_path}")
-                model = load_learner(model_path)
                 
-                return model
+                try:
+                    # Use a timeout to prevent hanging on corrupted files
+                    import signal
+                    
+                    def timeout_handler(signum, frame):
+                        raise TimeoutError("Model loading timed out")
+                    
+                    # Set timeout for model loading (5 seconds)
+                    if sys.platform != 'win32':  # signal.SIGALRM not available on Windows
+                        signal.signal(signal.SIGALRM, timeout_handler)
+                        signal.alarm(5)
+                    
+                    model = load_learner(model_path)
+                    
+                    # Cancel the alarm if loading succeeded
+                    if sys.platform != 'win32':
+                        signal.alarm(0)
+                    
+                    return model
+                except TimeoutError:
+                    logging.error("Model loading timed out - possible file corruption")
+                    return None
+                except EOFError:
+                    logging.error("EOFError: Pickle file is truncated or corrupted")
+                    return None
+                
         except PermissionError as pe:
             logging.error(f"Permission denied when loading model: {pe}")
             return None

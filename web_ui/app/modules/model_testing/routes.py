@@ -3,6 +3,7 @@ Routes for the model testing module.
 """
 import os
 import time
+import logging
 from flask import (
     Blueprint, render_template, request, jsonify
 )
@@ -90,9 +91,11 @@ def classify_image():
         # Load the model
         model = load_model(model_name)
         if model is None:
+            error_details = f"Could not load model '{model_name}'. The model file may be corrupted or inaccessible."
+            logging.error(error_details)
             return jsonify({
                 'success': False,
-                'error': 'Failed to load model. Please check if the model exists and is in PKL format.'
+                'error': error_details
             }), 500
             
         # Create a PILImage from file path
@@ -166,9 +169,11 @@ def batch_classify():
     try:
         model = load_model(model_name)
         if model is None:
+            error_details = f"Could not load model '{model_name}'. The model file may be corrupted or inaccessible."
+            logging.error(error_details)
             return jsonify({
                 'success': False,
-                'error': 'Failed to load model. Please check if the model exists and is in PKL format.'
+                'error': error_details
             }), 500
     except Exception as e:
         error_msg = str(e)
