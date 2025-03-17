@@ -38,10 +38,15 @@ def get_available_models():
     base_models_path = current_app.config['MODEL_PATH']
     models = []
     
+    print(f"DEBUG - Looking for models in: {base_models_path}")
+    print(f"DEBUG - Directory exists: {os.path.exists(base_models_path)}")
+    
     # Check the main models directory for .pkl and .h5 files
     if os.path.exists(base_models_path):
+        print(f"DEBUG - Contents of {base_models_path}:")
         for item in os.listdir(base_models_path):
             item_path = os.path.join(base_models_path, item)
+            print(f"DEBUG - Found: {item} ({os.path.isfile(item_path)=}, {os.path.isdir(item_path)=})")
             
             # Check if it's a direct model file (.pkl or .h5)
             if os.path.isfile(item_path) and (item.endswith('.pkl') or item.endswith('.h5')):
@@ -49,35 +54,47 @@ def get_available_models():
                 model_name = os.path.splitext(item)[0]
                 if model_name not in models:
                     models.append(model_name)
+                    print(f"DEBUG - Added file model: {model_name}")
                     
             # Check if it's a directory that might contain models
             elif os.path.isdir(item_path) and item != 'saved_models':
+                print(f"DEBUG - Checking directory: {item}")
                 # Check for model files within this directory
                 for file in os.listdir(item_path):
+                    print(f"DEBUG - Found file in {item}: {file}")
                     if file.endswith('.pkl') or file.endswith('.h5'):
                         # Use directory name as the model name
                         if item not in models:
                             models.append(item)
+                            print(f"DEBUG - Added directory model: {item}")
                             break
     
     # Also check the saved_models subdirectory
     saved_models_path = os.path.join(base_models_path, 'saved_models')
+    print(f"DEBUG - Checking saved_models at: {saved_models_path}")
+    print(f"DEBUG - saved_models exists: {os.path.exists(saved_models_path)}")
     if os.path.exists(saved_models_path):
+        print(f"DEBUG - Contents of {saved_models_path}:")
         for item in os.listdir(saved_models_path):
             item_path = os.path.join(saved_models_path, item)
+            print(f"DEBUG - Found in saved_models: {item} ({os.path.isdir(item_path)=})")
             
             # Include directories in saved_models
             if os.path.isdir(item_path):
                 # Check if the directory contains model files
                 has_model_file = False
                 for file in os.listdir(item_path):
+                    print(f"DEBUG - Found file in {item}: {file}")
                     if file.endswith('.pkl') or file.endswith('.h5') or file == 'metadata.json':
                         has_model_file = True
+                        print(f"DEBUG - Found valid model file: {file}")
                         break
                         
                 if has_model_file and item not in models:
                     models.append(item)
+                    print(f"DEBUG - Added saved_models model: {item}")
     
+    print(f"DEBUG - Final models list: {models}")
     return models
 
 
