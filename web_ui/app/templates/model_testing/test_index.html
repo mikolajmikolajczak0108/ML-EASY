@@ -257,7 +257,8 @@
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
-            }
+            },
+            body: JSON.stringify({})
         })
         .then(response => {
             // Set up event source for real-time updates

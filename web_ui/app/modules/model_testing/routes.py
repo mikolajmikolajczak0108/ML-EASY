@@ -120,7 +120,10 @@ def install_tensorflow():
     
     # Clear the queue
     while not installation_queue.empty():
-        installation_queue.get()
+        try:
+            installation_queue.get(block=False)
+        except:
+            pass
     
     # Start installation in background thread
     thread = threading.Thread(target=install_tensorflow_thread)
