@@ -4,8 +4,6 @@ import json
 import logging
 import traceback
 import threading
-import pickle
-import random
 from pathlib import Path
 
 from .utils import get_model_path, get_dataset_path
@@ -280,6 +278,21 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
                 self.training_start_time = None
                 # Add name attribute for fastai compatibility
                 self.name = 'status_callback'
+                self.order = 0  # Lower order runs earlier
+                
+            def __call__(self, event_name):
+                """Make the callback callable as required by fastai."""
+                # Map event names to handler methods
+                event_handlers = {
+                    'before_fit': self.before_fit,
+                    'before_epoch': self.before_epoch,
+                    'after_epoch': self.after_epoch,
+                    'after_fit': self.after_fit
+                }
+                
+                # Call appropriate handler if it exists
+                if event_name in event_handlers:
+                    event_handlers[event_name]()
                 
             def before_fit(self):
                 self.training_start_time = time.time()
@@ -645,21 +658,46 @@ def get_model_metadata(model_name):
 # Helper to safely convert class information to JSON-serializable format
 def safe_json_status(status_dict):
     """Convert status dictionary to JSON-serializable format."""
-    try:
-        # Make a copy to avoid modifying the original
-        status = status_dict.copy()
+    if not isinstance(status_dict, dict):
+        return {'status': 'error', 'message': 'Invalid status data'}
         
-        # Handle classes data which might contain CategoryMap objects
-        if 'classes' in status and hasattr(status['classes'], 'items'):
-            # Convert CategoryMap to simple list
-            status['classes'] = list(status['classes'])
-            
-        # Handle any other potentially non-serializable objects
-        return status
+    try:
+        # Make a deep copy to avoid modifying the original
+        import copy
+        status = copy.deepcopy(status_dict)
+        
+        # Helper function to process nested objects
+        def make_serializable(obj):
+            if hasattr(obj, 'items') and not isinstance(obj, dict):
+                # Convert dict-like objects (like CategoryMap) to list or dict
+                try:
+                    return list(obj)
+                except:
+                    try:
+                        return dict(obj)
+                    except:
+                        return str(obj)
+            elif isinstance(obj, dict):
+                # Process nested dictionaries
+                return {k: make_serializable(v) for k, v in obj.items()}
+            elif isinstance(obj, (list, tuple)):
+                # Process lists and tuples
+                return [make_serializable(item) for item in obj]
+            elif hasattr(obj, '__dict__'):
+                # Handle class instances
+                return str(obj)
+            else:
+                # Return basic types as is
+                return obj
+                
+        # Process the entire status dictionary
+        serializable_status = make_serializable(status)
+        return serializable_status
+        
     except Exception as e:
         logger.error(f"Error preparing status for JSON: {e}")
         # Return a simplified version that will definitely serialize
         return {
             'status': status_dict.get('status', 'error'),
-            'message': status_dict.get('message', 'Error preparing status')
+            'message': status_dict.get('message', 'Error preparing status') 
         } 
