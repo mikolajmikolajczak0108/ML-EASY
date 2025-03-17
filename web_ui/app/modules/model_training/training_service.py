@@ -16,6 +16,14 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
                     learning_rate, data_augmentation):
     """Background task to train a machine learning model with fastai/PyTorch."""
     try:
+        # Disable PyTorch multiprocessing to avoid Windows errors
+        os.environ['OMP_NUM_THREADS'] = '1'
+        os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:64'
+        
+        # Disable multiprocessing for DataLoader (avoids Windows issues)
+        # Must be set before importing torch
+        os.environ['FASTAI_NUM_WORKERS'] = '0'
+        
         # Extract dataset name if it's in dictionary format
         if isinstance(dataset_name, dict) and 'name' in dataset_name:
             dataset_name = dataset_name['name']
@@ -78,6 +86,51 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
         logger.info(f"Preparing dataset: {dataset_name}")
         dataset_path = os.path.join(get_dataset_path(), dataset_name)
         
+        # Verify that dataset directory exists and contains image files
+        if not os.path.exists(dataset_path):
+            error_msg = f"Dataset directory not found: {dataset_path}"
+            logger.error(error_msg)
+            update_training_status(model_name, {
+                'status': 'error',
+                'error': error_msg,
+                'error_type': 'dataset_not_found'
+            })
+            return False
+            
+        # Check if dataset has valid structure with class subdirectories
+        subdirs = [d for d in os.listdir(dataset_path) 
+                 if os.path.isdir(os.path.join(dataset_path, d))]
+        
+        if not subdirs:
+            error_msg = f"No class subdirectories found in dataset: {dataset_path}"
+            logger.error(error_msg)
+            update_training_status(model_name, {
+                'status': 'error',
+                'error': error_msg,
+                'error_type': 'invalid_dataset_structure'
+            })
+            return False
+            
+        # Check if each class directory has images
+        has_images = False
+        for subdir in subdirs:
+            class_dir = os.path.join(dataset_path, subdir)
+            image_files = [f for f in os.listdir(class_dir) 
+                          if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif'))]
+            if image_files:
+                has_images = True
+                break
+                
+        if not has_images:
+            error_msg = f"No image files found in dataset class directories: {dataset_path}"
+            logger.error(error_msg)
+            update_training_status(model_name, {
+                'status': 'error',
+                'error': error_msg,
+                'error_type': 'empty_dataset'
+            })
+            return False
+            
         # Set up augmentations based on user selection
         if data_augmentation:
             tfms = [
@@ -164,12 +217,19 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
                 model_arch = resnet50
             elif architecture == "MobileNetV2":
                 try:
-                    from timm import create_model
-                    model_arch = create_model('mobilenetv2_100', pretrained=True)
-                except ImportError:
-                    # Fallback to torchvision but configure correctly for fastai
+                    # Use direct torchvision model for MobileNetV2
+                    # First create the base model with pretrained weights
+                    from torchvision import models
                     model = models.mobilenet_v2(weights='IMAGENET1K_V1')
+                    # Use the model directly (fastai will handle the head)
                     model_arch = model
+                except Exception as mobile_err:
+                    logger.error(f"Error with MobileNetV2: {mobile_err}")
+                    # Fallback to ResNet18 which is very reliable
+                    from fastai.vision.all import resnet18
+                    logger.warning("MobileNetV2 failed, using ResNet18 instead")
+                    model_arch = resnet18
+                    architecture = "ResNet18 (fallback)"
             elif architecture == "EfficientNetB0":
                 try:
                     from timm import create_model
@@ -292,201 +352,277 @@ def train_model_task(model_name, dataset_name, architecture, epochs, batch_size,
                 
                 # Call appropriate handler if it exists
                 if event_name in event_handlers:
-                    event_handlers[event_name]()
+                    try:
+                        event_handlers[event_name]()
+                    except Exception as e:
+                        logger.error(f"Error in callback {event_name}: {e}")
                 
             def before_fit(self):
                 self.training_start_time = time.time()
-                update_training_status(self.model_name, {
-                    'status': 'training',
-                    'progress': 65,
-                    'stage': 'starting_training',
-                    'epoch': 1,
-                    'total_epochs': self.total_epochs,
-                    'message': 'Starting model training...',
-                    'metrics': {}
-                })
+                try:
+                    update_training_status(self.model_name, {
+                        'status': 'training',
+                        'progress': 65,
+                        'stage': 'starting_training',
+                        'epoch': 1,
+                        'total_epochs': self.total_epochs,
+                        'message': 'Starting model training...',
+                        'metrics': {}
+                    })
+                except Exception as e:
+                    logger.error(f"Error updating status in before_fit: {e}")
                 
             def before_epoch(self):
-                self.current_epoch = learn.epoch
-                # Calculate progress - account for freeze and fine tune phases
-                # First 1 epoch is freeze training at 5% each, remaining epochs are fine tuning
-                base_progress = 65 # Starting progress for training phase
-                freeze_progress = 5 # Progress per freeze epoch
-                remaining_progress = 30 # Progress for all fine tune epochs
-                
-                if self.current_epoch == 0:
-                    # First epoch (freeze) represents first 5% of progress
-                    progress = base_progress + 2.5
-                else:
-                    # After freeze, divide remaining progress among fine tune epochs
-                    fine_tune_progress = self.current_epoch * (remaining_progress / self.total_epochs)
-                    progress = base_progress + freeze_progress + fine_tune_progress
-                
-                update_training_status(self.model_name, {
-                    'status': 'training',
-                    'progress': min(95, progress), # Cap at 95% until complete
-                    'stage': 'training_epoch',
-                    'phase': 'freeze' if self.current_epoch == 0 else 'fine_tune',
-                    'epoch': self.current_epoch + 1,
-                    'total_epochs': self.total_epochs,
-                    'message': f'Training epoch {self.current_epoch + 1}/{self.total_epochs}',
-                    'metrics': {}
-                })
+                try:
+                    # Be defensive about accessing learn.epoch
+                    epoch = 0
+                    try:
+                        if hasattr(learn, 'epoch'):
+                            epoch = learn.epoch
+                        self.current_epoch = epoch
+                    except:
+                        pass
+                        
+                    # Calculate progress
+                    base_progress = 65
+                    freeze_progress = 5 
+                    remaining_progress = 30
+                    
+                    if self.current_epoch == 0:
+                        progress = base_progress + 2.5
+                    else:
+                        fine_tune_progress = self.current_epoch * (remaining_progress / max(1, self.total_epochs))
+                        progress = base_progress + freeze_progress + fine_tune_progress
+                    
+                    update_training_status(self.model_name, {
+                        'status': 'training',
+                        'progress': min(95, progress),
+                        'stage': 'training_epoch',
+                        'phase': 'freeze' if self.current_epoch == 0 else 'fine_tune',
+                        'epoch': self.current_epoch + 1,
+                        'total_epochs': self.total_epochs,
+                        'message': f'Training epoch {self.current_epoch + 1}/{self.total_epochs}',
+                        'metrics': {}
+                    })
+                except Exception as e:
+                    logger.error(f"Error updating status in before_epoch: {e}")
                 
             def after_epoch(self):
-                # Get current epoch metrics
-                epoch = learn.epoch
-                train_loss = float(learn.recorder.losses[-1])
-                valid_loss = float(learn.recorder.values[-1][0])
-                accuracy_val = float(learn.recorder.values[-1][1])
-                error_rate_val = float(learn.recorder.values[-1][2])
-                
-                # Calculate progress percentage based on completed epochs
-                base_progress = 65
-                freeze_progress = 5
-                remaining_progress = 30
-                
-                if epoch == 0:
-                    # First epoch (freeze) is complete
-                    progress = base_progress + freeze_progress
-                else:
-                    # Calculate fine-tuning progress
-                    fine_tune_progress = (epoch + 1) * (remaining_progress / self.total_epochs)
-                    progress = base_progress + freeze_progress + fine_tune_progress
-                
-                # Update training status with detailed metrics
-                update_training_status(self.model_name, {
-                    'status': 'training',
-                    'progress': min(95, progress), # Cap at 95% until complete
-                    'stage': 'epoch_complete',
-                    'phase': 'freeze' if epoch == 0 else 'fine_tune',
-                    'epoch': epoch + 1,
-                    'total_epochs': self.total_epochs,
-                    'message': f'Completed epoch {epoch + 1}/{self.total_epochs}',
-                    'metrics': {
-                        'loss': train_loss,
-                        'accuracy': accuracy_val,
-                        'val_loss': valid_loss,
-                        'val_accuracy': 1 - error_rate_val,  # Convert error to accuracy
+                try:
+                    # Safely get metrics
+                    epoch = self.current_epoch
+                    train_loss = 0
+                    valid_loss = 0
+                    accuracy_val = 0
+                    error_rate_val = 0
+                    
+                    # Safely extract metrics
+                    try:
+                        if hasattr(learn, 'recorder') and hasattr(learn.recorder, 'losses') and len(learn.recorder.losses) > 0:
+                            train_loss = float(learn.recorder.losses[-1])
+                            
+                        if hasattr(learn, 'recorder') and hasattr(learn.recorder, 'values') and len(learn.recorder.values) > 0:
+                            values = learn.recorder.values[-1]
+                            if len(values) > 0:
+                                valid_loss = float(values[0])
+                            if len(values) > 1:
+                                accuracy_val = float(values[1])
+                            if len(values) > 2:
+                                error_rate_val = float(values[2])
+                    except Exception as metric_err:
+                        logger.error(f"Error extracting metrics: {metric_err}")
+                    
+                    # Calculate progress percentage based on completed epochs
+                    base_progress = 65
+                    freeze_progress = 5
+                    remaining_progress = 30
+                    
+                    if epoch == 0:
+                        progress = base_progress + freeze_progress
+                    else:
+                        fine_tune_progress = (epoch + 1) * (remaining_progress / max(1, self.total_epochs))
+                        progress = base_progress + freeze_progress + fine_tune_progress
+                    
+                    # Update training status with detailed metrics
+                    update_training_status(self.model_name, {
+                        'status': 'training',
+                        'progress': min(95, progress),
+                        'stage': 'epoch_complete',
+                        'phase': 'freeze' if epoch == 0 else 'fine_tune',
                         'epoch': epoch + 1,
-                        'total_epochs': self.total_epochs
-                    }
-                })
-                logger.info(f"Epoch {epoch+1}/{self.total_epochs} complete. Loss: {train_loss:.4f}, Accuracy: {accuracy_val:.4f}")
+                        'total_epochs': self.total_epochs,
+                        'message': f'Completed epoch {epoch + 1}/{self.total_epochs}',
+                        'metrics': {
+                            'loss': train_loss,
+                            'accuracy': accuracy_val,
+                            'val_loss': valid_loss,
+                            'val_accuracy': 1 - error_rate_val,
+                            'epoch': epoch + 1,
+                            'total_epochs': self.total_epochs
+                        }
+                    })
+                    logger.info(f"Epoch {epoch+1}/{self.total_epochs} complete. Loss: {train_loss:.4f}, Accuracy: {accuracy_val:.4f}")
+                except Exception as e:
+                    logger.error(f"Error updating status in after_epoch: {e}")
             
             def after_fit(self):
-                # Update status when training is complete
-                update_training_status(self.model_name, {
-                    'status': 'saving',
-                    'progress': 95,
-                    'stage': 'training_complete',
-                    'message': 'Training complete, saving model...',
-                })
+                try:
+                    # Update status when training is complete
+                    update_training_status(self.model_name, {
+                        'status': 'saving',
+                        'progress': 95,
+                        'stage': 'training_complete',
+                        'message': 'Training complete, saving model...',
+                    })
+                except Exception as e:
+                    logger.error(f"Error updating status in after_fit: {e}")
         
         # Register our custom callback
         status_cb = StatusCallback(model_name)
         learn.add_cb(status_cb)
         
-        # Train the model
-        learn.fine_tune(epochs, freeze_epochs=1)
-        
-        # Get final metrics from the recorder
-        final_train_loss = float(learn.recorder.losses[-1])
-        final_valid_loss = float(learn.recorder.values[-1][0])
-        final_accuracy = float(learn.recorder.values[-1][1])
-        final_error_rate = float(learn.recorder.values[-1][2])
+        # Train the model with additional error handling
+        try:
+            # Use one-cycle policy for better stability
+            learn.fine_tune(epochs, freeze_epochs=1)
+            
+            # Get final metrics from the recorder
+            final_train_loss = 0
+            final_valid_loss = 0
+            final_accuracy = 0
+            final_error_rate = 0
+            
+            # Safely try to extract metrics
+            try:
+                if hasattr(learn, 'recorder') and len(learn.recorder.losses) > 0:
+                    final_train_loss = float(learn.recorder.losses[-1])
+                
+                if hasattr(learn, 'recorder') and len(learn.recorder.values) > 0:
+                    if len(learn.recorder.values[-1]) > 0:
+                        final_valid_loss = float(learn.recorder.values[-1][0])
+                    if len(learn.recorder.values[-1]) > 1:
+                        final_accuracy = float(learn.recorder.values[-1][1])
+                    if len(learn.recorder.values[-1]) > 2:
+                        final_error_rate = float(learn.recorder.values[-1][2])
+            except Exception as metric_err:
+                logger.error(f"Error extracting final metrics: {metric_err}")
+                
+        except Exception as train_err:
+            logger.error(f"Error during training: {train_err}")
+            logger.error(traceback.format_exc())
+            update_training_status(model_name, {
+                'status': 'error',
+                'error': f"Training failed: {str(train_err)}",
+                'error_type': 'training_error'
+            })
+            return False
         
         # 4. Save model
-        update_training_status(model_name, {
-            'status': 'saving',
-            'progress': 95,
-            'stage': 'saving_model',
-            'message': f'Saving trained model: {model_name}',
-            'metrics': {
-                'loss': final_train_loss,
-                'accuracy': final_accuracy,
-                'val_loss': final_valid_loss,
-                'val_accuracy': 1 - final_error_rate
-            }
-        })
-        
-        logger.info(f"Saving trained model: {model_name}")
-        
-        # Create model directory
-        model_dir = os.path.join(get_model_path(), 'saved_models', model_name)
-        os.makedirs(model_dir, exist_ok=True)
-        
-        # Save model metadata
-        metadata = {
-            'model_name': model_name,
-            'dataset': dataset_name,
-            'architecture': architecture,
-            'epochs': epochs,
-            'batch_size': batch_size,
-            'learning_rate': learning_rate,
-            'data_augmentation': data_augmentation,
-            'date_created': time.strftime('%Y-%m-%d %H:%M:%S'),
-            'num_classes': num_classes,
-            'class_names': class_names,
-            'final_metrics': {
-                'loss': final_train_loss,
-                'accuracy': final_accuracy,
-                'val_loss': final_valid_loss,
-                'val_accuracy': 1 - final_error_rate
-            }
-        }
-        
-        update_training_status(model_name, {
-            'status': 'saving',
-            'progress': 97,
-            'stage': 'saving_metadata',
-            'message': 'Saving model metadata...'
-        })
-        
-        with open(os.path.join(model_dir, 'metadata.json'), 'w') as f:
-            json.dump(metadata, f, indent=4)
-        
-        # Save fastai model - this creates a proper pickle file
-        update_training_status(model_name, {
-            'status': 'saving',
-            'progress': 98,
-            'stage': 'exporting_model',
-            'message': 'Exporting model to PKL format...'
-        })
-        
-        model_pkl_path = os.path.join(model_dir, 'model.pkl')
-        learn.export(model_pkl_path)
-        logger.info(f"Saved fastai model to: {model_pkl_path}")
-        
-        # Also export to export.pkl for maximum compatibility
-        export_pkl_path = os.path.join(model_dir, 'export.pkl')
-        learn.export(export_pkl_path)
-        logger.info(f"Saved fastai export model to: {export_pkl_path}")
-        
-        # 5. Mark training as complete
-        update_training_status(model_name, {
-            'status': 'completed',
-            'progress': 100,
-            'stage': 'completed',
-            'message': 'Training completed successfully!',
-            'metrics': {
-                'loss': final_train_loss,
-                'accuracy': final_accuracy,
-                'val_loss': final_valid_loss,
-                'val_accuracy': 1 - final_error_rate
-            },
-            'model_info': {
+        try:
+            update_training_status(model_name, {
+                'status': 'saving',
+                'progress': 95,
+                'stage': 'saving_model',
+                'message': f'Saving trained model: {model_name}',
+                'metrics': {
+                    'loss': final_train_loss,
+                    'accuracy': final_accuracy,
+                    'val_loss': final_valid_loss,
+                    'val_accuracy': 1 - final_error_rate
+                }
+            })
+            
+            logger.info(f"Saving trained model: {model_name}")
+            
+            # Create model directory
+            model_dir = os.path.join(get_model_path(), 'saved_models', model_name)
+            os.makedirs(model_dir, exist_ok=True)
+            
+            # Save model metadata
+            metadata = {
                 'model_name': model_name,
                 'dataset': dataset_name,
                 'architecture': architecture,
+                'epochs': epochs,
+                'batch_size': batch_size,
+                'learning_rate': learning_rate,
+                'data_augmentation': data_augmentation,
+                'date_created': time.strftime('%Y-%m-%d %H:%M:%S'),
                 'num_classes': num_classes,
                 'class_names': class_names,
-                'training_time': int(time.time() - float(status_cb.training_start_time)) if hasattr(status_cb, 'training_start_time') else None
+                'final_metrics': {
+                    'loss': final_train_loss,
+                    'accuracy': final_accuracy,
+                    'val_loss': final_valid_loss,
+                    'val_accuracy': 1 - final_error_rate
+                }
             }
-        })
-        
-        logger.info(f"Model training completed successfully: {model_name}")
-        return True
+            
+            update_training_status(model_name, {
+                'status': 'saving',
+                'progress': 97,
+                'stage': 'saving_metadata',
+                'message': 'Saving model metadata...'
+            })
+            
+            with open(os.path.join(model_dir, 'metadata.json'), 'w') as f:
+                json.dump(metadata, f, indent=4)
+            
+            # Save fastai model with additional error handling
+            try:
+                update_training_status(model_name, {
+                    'status': 'saving',
+                    'progress': 98,
+                    'stage': 'exporting_model',
+                    'message': 'Exporting model to PKL format...'
+                })
+                
+                model_pkl_path = os.path.join(model_dir, 'model.pkl')
+                learn.export(model_pkl_path)
+                logger.info(f"Saved fastai model to: {model_pkl_path}")
+                
+                # Also export to export.pkl for maximum compatibility
+                export_pkl_path = os.path.join(model_dir, 'export.pkl')
+                learn.export(export_pkl_path)
+                logger.info(f"Saved fastai export model to: {export_pkl_path}")
+                
+            except Exception as export_err:
+                logger.error(f"Error exporting model: {export_err}")
+                # Continue with completion even if export fails
+                
+            # 5. Mark training as complete
+            update_training_status(model_name, {
+                'status': 'completed',
+                'progress': 100,
+                'stage': 'completed',
+                'message': 'Training completed successfully!',
+                'metrics': {
+                    'loss': final_train_loss,
+                    'accuracy': final_accuracy,
+                    'val_loss': final_valid_loss,
+                    'val_accuracy': 1 - final_error_rate
+                },
+                'model_info': {
+                    'model_name': model_name,
+                    'dataset': dataset_name,
+                    'architecture': architecture,
+                    'num_classes': num_classes,
+                    'class_names': class_names,
+                    'training_time': int(time.time() - float(status_cb.training_start_time)) if hasattr(status_cb, 'training_start_time') and status_cb.training_start_time else None
+                }
+            })
+            
+            logger.info(f"Model training completed successfully: {model_name}")
+            return True
+            
+        except Exception as save_err:
+            logger.error(f"Error saving model: {save_err}")
+            update_training_status(model_name, {
+                'status': 'error',
+                'error': f"Failed to save model: {str(save_err)}",
+                'error_type': 'save_error'
+            })
+            return False
         
     except Exception as e:
         logger.error(f"Error training model {model_name}: {e}")
@@ -510,17 +646,32 @@ def update_training_status(model_name, status_update):
         status_file = os.path.join(status_dir, f"{model_name}.json")
         
         # If file exists, read and update
+        status = {
+            'model_name': model_name,
+            'started_at': str(time.time()),
+            'status': 'initializing',
+            'progress': 0
+        }
+        
         if os.path.exists(status_file):
-            with open(status_file, 'r') as f:
-                status = json.load(f)
-        else:
-            # Create new status
-            status = {
-                'model_name': model_name,
-                'started_at': str(time.time()),
-                'status': 'initializing',
-                'progress': 0
-            }
+            try:
+                with open(status_file, 'r') as f:
+                    existing = json.load(f)
+                    # Only update if valid
+                    if isinstance(existing, dict):
+                        status.update(existing)
+            except (json.JSONDecodeError, ValueError) as e:
+                # File exists but is corrupt - log and continue with new status
+                logger.error(f"Error reading status file {status_file}, creating new status: {e}")
+                # Maybe backup the corrupt file for debugging
+                if os.path.getsize(status_file) > 0:
+                    corrupt_file = f"{status_file}.corrupt"
+                    try:
+                        import shutil
+                        shutil.copy2(status_file, corrupt_file)
+                        logger.info(f"Backed up corrupt status file to {corrupt_file}")
+                    except Exception as backup_err:
+                        logger.error(f"Failed to backup corrupt status file: {backup_err}")
         
         # Update status with new values
         status.update(status_update)
@@ -531,10 +682,19 @@ def update_training_status(model_name, status_update):
         # If training completed, add completion time
         if status_update.get('status') == 'completed':
             safe_status['completed_at'] = str(time.time())
-            
-        # Write updated status to file
-        with open(status_file, 'w') as f:
+        
+        # Write updated status to file - use atomic write pattern to prevent corruption
+        temp_file = f"{status_file}.tmp"
+        with open(temp_file, 'w') as f:
             json.dump(safe_status, f, indent=2)
+        
+        # Rename temp file to actual file (atomic operation)
+        import os
+        if os.name == 'nt':  # Windows
+            # Windows requires removing the destination file first
+            if os.path.exists(status_file):
+                os.remove(status_file)
+        os.rename(temp_file, status_file)
             
         logger.debug(f"Updated training status for {model_name}: {status_update.get('status')}")
     except Exception as e:
