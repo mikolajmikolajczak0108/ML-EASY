@@ -53,6 +53,11 @@
                                 <div class="form-text">
                                     Choose the model you want to test your image against.
                                 </div>
+                                <div class="alert alert-warning mt-2">
+                                    <i class="fas fa-exclamation-triangle me-2"></i>
+                                    <strong>Note:</strong> TensorFlow models (.h5 format) require TensorFlow to be installed.
+                                    If you encounter errors, please install TensorFlow using <code>pip install tensorflow</code>.
+                                </div>
                             </div>
                             
                             <div class="mb-3">
@@ -90,6 +95,11 @@
                                     <option value="{{ model }}">{{ model }}</option>
                                     {% endfor %}
                                 </select>
+                                <div class="alert alert-warning mt-2">
+                                    <i class="fas fa-exclamation-triangle me-2"></i>
+                                    <strong>Note:</strong> TensorFlow models (.h5 format) require TensorFlow to be installed.
+                                    If you encounter errors, please install TensorFlow using <code>pip install tensorflow</code>.
+                                </div>
                             </div>
                             
                             <div class="mb-3">

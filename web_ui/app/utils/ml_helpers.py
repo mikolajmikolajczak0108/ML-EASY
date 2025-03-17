@@ -41,58 +41,73 @@ def get_available_models():
     print(f"DEBUG - Looking for models in: {base_models_path}")
     print(f"DEBUG - Directory exists: {os.path.exists(base_models_path)}")
     
-    # Check the main models directory for .pkl and .h5 files
-    if os.path.exists(base_models_path):
-        print(f"DEBUG - Contents of {base_models_path}:")
-        for item in os.listdir(base_models_path):
-            item_path = os.path.join(base_models_path, item)
-            print(f"DEBUG - Found: {item} ({os.path.isfile(item_path)=}, {os.path.isdir(item_path)=})")
+    # Function to recursively find model files
+    def find_model_files(directory):
+        found_models = []
+        if not os.path.exists(directory):
+            print(f"DEBUG - Directory does not exist: {directory}")
+            return found_models
             
-            # Check if it's a direct model file (.pkl or .h5)
-            if os.path.isfile(item_path) and (item.endswith('.pkl') or item.endswith('.h5')):
-                # Add the filename without extension as the model name
-                model_name = os.path.splitext(item)[0]
-                if model_name not in models:
-                    models.append(model_name)
-                    print(f"DEBUG - Added file model: {model_name}")
+        for root, dirs, files in os.walk(directory):
+            print(f"DEBUG - Searching directory: {root}")
+            print(f"DEBUG - Subdirectories found: {dirs}")
+            print(f"DEBUG - Files found: {files}")
+            
+            # Check for model files in current directory
+            for file in files:
+                # Support various model file extensions
+                if file.endswith(('.pkl', '.h5', '.pt', '.pth', '.model')):
+                    # Extract model name from file path
+                    rel_path = os.path.relpath(root, base_models_path)
                     
-            # Check if it's a directory that might contain models
-            elif os.path.isdir(item_path) and item != 'saved_models':
-                print(f"DEBUG - Checking directory: {item}")
-                # Check for model files within this directory
-                for file in os.listdir(item_path):
-                    print(f"DEBUG - Found file in {item}: {file}")
-                    if file.endswith('.pkl') or file.endswith('.h5'):
-                        # Use directory name as the model name
-                        if item not in models:
-                            models.append(item)
-                            print(f"DEBUG - Added directory model: {item}")
-                            break
-    
-    # Also check the saved_models subdirectory
-    saved_models_path = os.path.join(base_models_path, 'saved_models')
-    print(f"DEBUG - Checking saved_models at: {saved_models_path}")
-    print(f"DEBUG - saved_models exists: {os.path.exists(saved_models_path)}")
-    if os.path.exists(saved_models_path):
-        print(f"DEBUG - Contents of {saved_models_path}:")
-        for item in os.listdir(saved_models_path):
-            item_path = os.path.join(saved_models_path, item)
-            print(f"DEBUG - Found in saved_models: {item} ({os.path.isdir(item_path)=})")
-            
-            # Include directories in saved_models
-            if os.path.isdir(item_path):
-                # Check if the directory contains model files
-                has_model_file = False
-                for file in os.listdir(item_path):
-                    print(f"DEBUG - Found file in {item}: {file}")
-                    if file.endswith('.pkl') or file.endswith('.h5') or file == 'metadata.json':
-                        has_model_file = True
-                        print(f"DEBUG - Found valid model file: {file}")
-                        break
+                    # Try different strategies to get a meaningful model name
+                    if rel_path == '.':
+                        # If in root directory, use filename without extension
+                        model_name = os.path.splitext(file)[0]
+                    else:
+                        # Check if we're in a nested structure like saved_models/CatsDogs
+                        path_parts = rel_path.split(os.sep)
+                        if len(path_parts) > 1:
+                            # Use the deepest directory name that's not 'saved_models'
+                            for part in reversed(path_parts):
+                                if part.lower() != 'saved_models':
+                                    model_name = part
+                                    break
+                            else:
+                                model_name = os.path.splitext(file)[0]
+                        else:
+                            # Use directory name
+                            model_name = os.path.basename(root)
+                    
+                    # Clean up model name if needed
+                    if model_name.lower() in ('model', 'models'):
+                        # If model name is generic, use parent directory + filename
+                        parent_dir = os.path.basename(os.path.dirname(root))
+                        if parent_dir and parent_dir.lower() not in ('model', 'models'):
+                            model_name = f"{parent_dir}_{os.path.splitext(file)[0]}"
+                        else:
+                            model_name = os.path.splitext(file)[0]
+                    
+                    if model_name not in found_models:
+                        found_models.append(model_name)
+                        print(f"DEBUG - Found model: {model_name} in {rel_path}/{file}")
                         
-                if has_model_file and item not in models:
-                    models.append(item)
-                    print(f"DEBUG - Added saved_models model: {item}")
+        return found_models
+    
+    # Find all model files recursively
+    models = find_model_files(base_models_path)
+    
+    # If no models found, try looking for metadata.json files which might indicate models
+    if not models:
+        print("DEBUG - No models found with standard extensions, looking for metadata")
+        for root, dirs, files in os.walk(base_models_path):
+            for file in files:
+                if file.lower() == 'metadata.json':
+                    # Extract model name from directory containing metadata
+                    model_dir = os.path.basename(root)
+                    if model_dir and model_dir not in models:
+                        models.append(model_dir)
+                        print(f"DEBUG - Found model via metadata: {model_dir}")
     
     print(f"DEBUG - Final models list: {models}")
     return models
@@ -143,6 +158,14 @@ def load_model(model_name):
     base_models_path = current_app.config['MODEL_PATH']
     
     try:
+        # First, check if TensorFlow is available for .h5 models
+        has_tensorflow = False
+        try:
+            import tensorflow
+            has_tensorflow = True
+        except ImportError:
+            print("Warning: TensorFlow not installed. Cannot load .h5 models.")
+        
         # Check possible locations for this model
         
         # 1. Check if it's a .pkl file in the base models directory
@@ -153,12 +176,11 @@ def load_model(model_name):
         # 2. Check if it's a .h5 file in the base models directory
         model_file = os.path.join(base_models_path, f"{model_name}.h5")
         if os.path.exists(model_file) and os.path.isfile(model_file):
-            try:
+            if has_tensorflow:
                 from tensorflow.keras.models import load_model as keras_load_model
                 return keras_load_model(model_file)
-            except ImportError:
-                print("TensorFlow not installed - cannot load .h5 model")
-                return None
+            else:
+                raise ImportError("TensorFlow required to load .h5 models. Please install TensorFlow first.")
                 
         # 3. Check if it's a subdirectory of base_models_path
         model_dir = os.path.join(base_models_path, model_name)
@@ -172,12 +194,11 @@ def load_model(model_name):
             # Then check for .h5 files
             for file in os.listdir(model_dir):
                 if file.endswith('.h5'):
-                    try:
+                    if has_tensorflow:
                         from tensorflow.keras.models import load_model as keras_load_model
                         return keras_load_model(os.path.join(model_dir, file))
-                    except ImportError:
-                        print("TensorFlow not installed - cannot load .h5 model")
-                        return None
+                    else:
+                        raise ImportError("TensorFlow required to load .h5 models. Please install TensorFlow first.")
         
         # 4. Check in the saved_models subdirectory
         saved_models_dir = os.path.join(base_models_path, 'saved_models', model_name)
@@ -197,22 +218,20 @@ def load_model(model_name):
             # Then look for model.h5 (Keras/TensorFlow format)
             model_file = os.path.join(saved_models_dir, 'model.h5')
             if os.path.exists(model_file):
-                try:
+                if has_tensorflow:
                     from tensorflow.keras.models import load_model as keras_load_model
                     return keras_load_model(model_file)
-                except ImportError:
-                    print("TensorFlow not installed - cannot load .h5 model")
-                    return None
+                else:
+                    raise ImportError("TensorFlow required to load .h5 models. Please install TensorFlow first.")
             
             # Check for any .h5 file
             h5_files = [f for f in os.listdir(saved_models_dir) if f.endswith('.h5')]
             if h5_files:
-                try:
+                if has_tensorflow:
                     from tensorflow.keras.models import load_model as keras_load_model
                     return keras_load_model(os.path.join(saved_models_dir, h5_files[0]))
-                except ImportError:
-                    print("TensorFlow not installed - cannot load .h5 model")
-                    return None
+                else:
+                    raise ImportError("TensorFlow required to load .h5 models. Please install TensorFlow first.")
                     
             # Check for any .pkl file
             pkl_files = [f for f in os.listdir(saved_models_dir) if f.endswith('.pkl')]
@@ -220,11 +239,12 @@ def load_model(model_name):
                 return load_learner(os.path.join(saved_models_dir, pkl_files[0]))
                 
         # Model not found in any location
-        print(f"Model '{model_name}' not found in any location")
-        return None
+        raise FileNotFoundError(f"Model '{model_name}' not found in any location")
     except Exception as e:
-        # Add logging for debugging
+        # Add proper error handling with contextual information
+        import traceback
         print(f"Error loading model {model_name}: {str(e)}")
+        print(traceback.format_exc())
         return None
 
 

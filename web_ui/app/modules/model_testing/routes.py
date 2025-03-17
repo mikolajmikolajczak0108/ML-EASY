@@ -95,7 +95,7 @@ def classify_image():
         if model is None:
             return jsonify({
                 'success': False,
-                'error': 'Failed to load model'
+                'error': 'Failed to load model. If this is a TensorFlow/Keras (.h5) model, you need to install TensorFlow.'
             }), 500
             
         # Create a PILImage from file path
@@ -128,9 +128,14 @@ def classify_image():
         })
         
     except Exception as e:
+        error_msg = str(e)
+        # Special handling for common errors
+        if "TensorFlow required" in error_msg or "No module named 'tensorflow'" in error_msg:
+            error_msg = "This model requires TensorFlow to be installed. Please install TensorFlow to use this model."
+            
         return jsonify({
             'success': False,
-            'error': f'Error processing image: {str(e)}'
+            'error': f'Error processing image: {error_msg}'
         }), 500
 
 
@@ -170,12 +175,17 @@ def batch_classify():
         if model is None:
             return jsonify({
                 'success': False,
-                'error': 'Failed to load model'
+                'error': 'Failed to load model. If this is a TensorFlow/Keras (.h5) model, you need to install TensorFlow.'
             }), 500
     except Exception as e:
+        error_msg = str(e)
+        # Special handling for common errors
+        if "TensorFlow required" in error_msg or "No module named 'tensorflow'" in error_msg:
+            error_msg = "This model requires TensorFlow to be installed. Please install TensorFlow to use this model."
+        
         return jsonify({
             'success': False,
-            'error': f'Error loading model: {str(e)}'
+            'error': f'Error loading model: {error_msg}'
         }), 500
     
     # For batch processing, we'll use a synchronous approach but process
