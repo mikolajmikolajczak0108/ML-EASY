@@ -1172,7 +1172,8 @@ def train_model_task(dataset_name, model_name, architecture='resnet34', epochs=1
             
             # Import additional libraries for better training
             from fastai.callback.all import ReduceLROnPlateau, SaveModelCallback, EarlyStoppingCallback
-            from fastai.learner import minimum, steep, valley, slide
+            # Comment out the problematic import that's causing errors with fastai 2.7.19
+            # from fastai.learner import minimum, steep, valley, slide
             
         except ImportError as e:
             print(f"Failed to import required libraries: {e}")
@@ -1524,10 +1525,17 @@ def train_model_task(dataset_name, model_name, architecture='resnet34', epochs=1
             print("\n===== FINDING OPTIMAL LEARNING RATE =====")
             try:
                 print("Running learning rate finder to determine optimal learning rate")
-                lr_finder = learn.lr_find(suggest_funcs=(minimum, steep, valley, slide))
+                # Update to use lr_find without the suggest_funcs parameter that's causing errors
+                lr_finder = learn.lr_find()
                 
                 # Get the suggested learning rate
-                suggested_lr = lr_finder.valley
+                try:
+                    suggested_lr = lr_finder.valley()
+                except:
+                    try:
+                        suggested_lr = lr_finder.steep() / 10
+                    except:
+                        suggested_lr = learning_rate  # Fall back to specified learning rate
                 
                 # If no good learning rate found, use a reasonable default
                 if not suggested_lr or suggested_lr < 1e-5 or suggested_lr > 0.1:
